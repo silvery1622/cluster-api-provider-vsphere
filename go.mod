@@ -8,8 +8,9 @@ require (
 	github.com/vmware-tanzu/net-operator-api v0.0.0-20250826165015-90a4bb21727b
 	github.com/vmware-tanzu/nsx-operator/pkg/apis v0.0.0-20250813103855-288a237381b5
 	// The version of vm-operator should be kept in sync with the manifests at: config/deployments/integration-tests
-	github.com/vmware-tanzu/vm-operator/api v1.9.1-0.20260410045241-141a13693b2a
-	github.com/vmware-tanzu/vm-operator/external/ncp v0.0.0-20260410045241-141a13693b2a
+	// Pinned to vm-operator PR #1552 (hpannem/topic/hpannem/dualstack-final @ 86db0a258f37) until merged upstream.
+	github.com/vmware-tanzu/vm-operator/api v0.0.0-20260415041850-86db0a258f37
+	github.com/vmware-tanzu/vm-operator/external/ncp v0.0.0-20260415041850-86db0a258f37
 	github.com/vmware/govmomi v0.53.0
 )
 
@@ -124,4 +125,12 @@ require (
 	k8s.io/apiserver v0.35.3 // indirect
 	k8s.io/kube-openapi v0.0.0-20250910181357-589584f1c912 // indirect
 	sigs.k8s.io/json v0.0.0-20250730193827-2d320260d730 // indirect
+)
+
+// Bump vm-operator to PR #1552 (dual-stack networking: NetOP IPv6 assignment modes, VirtualMachineService changes)
+// Source: https://github.com/vmware-tanzu/vm-operator/pull/1552 (hpannem fork @ 86db0a258f37a6aa322434ba2c7be5afd16cdf31)
+// TODO: remove these replace directives once the PR is merged and released upstream.
+replace (
+	github.com/vmware-tanzu/vm-operator/api => github.com/hpannem/vm-operator/api v0.0.0-20260415041850-86db0a258f37
+	github.com/vmware-tanzu/vm-operator/external/ncp => github.com/hpannem/vm-operator/external/ncp v0.0.0-20260415041850-86db0a258f37
 )
