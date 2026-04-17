@@ -19,8 +19,10 @@ package vmware
 
 import (
 	"context"
+	goerrors "errors"
 	"fmt"
 	"slices"
+	"time"
 
 	"github.com/pkg/errors"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -70,6 +72,7 @@ type ClusterReconciler struct {
 // +kubebuilder:rbac:groups=crd.nsx.vmware.com,resources=subnetsets;subnetsets/status,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=vmware.com,resources=virtualnetworks;virtualnetworks/status,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=vmoperator.vmware.com,resources=virtualmachinesetresourcepolicies;virtualmachinesetresourcepolicies/status,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups=controlplane.cluster.x-k8s.io,resources=kubeadmcontrolplanes,verbs=get;list;watch
 // +kubebuilder:rbac:groups=vmoperator.vmware.com,resources=virtualmachineservices;virtualmachineservices/status,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=netoperator.vmware.com,resources=networks,verbs=get;list;watch
 // +kubebuilder:rbac:groups="",resources=persistentvolumeclaims,verbs=get;list;watch;update;create;delete
@@ -138,7 +141,14 @@ func (r *ClusterReconciler) Reconcile(ctx context.Context, req ctrl.Request) (_ 
 	}
 
 	// Handle non-deleted clusters
-	return ctrl.Result{}, r.reconcileNormal(ctx, clusterContext)
+	if err := r.reconcileNormal(ctx, clusterContext); err != nil {
+		// Requeue with short delay when waiting for KCP (e.g. observedGeneration to match); avoid long backoff.
+		if goerrors.Is(err, services.ErrWaitingForKCPReady) {
+			return ctrl.Result{RequeueAfter: 15 * time.Second}, nil
+		}
+		return ctrl.Result{}, err
+	}
+	return ctrl.Result{}, nil
 }
 
 func (r *ClusterReconciler) patch(ctx context.Context, clusterCtx *vmware.ClusterContext) error {

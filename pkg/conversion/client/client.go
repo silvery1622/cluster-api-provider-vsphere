@@ -378,3 +378,19 @@ func (c *conversionClient) newObjectListItemFor(list client.ObjectList) (client.
 	}
 	return obj, nil
 }
+
+// SpokeGroupVersionFor returns the target spoke GroupVersion for a hub object registered
+// with c. It returns the GroupVersion (e.g. {Group: "vmoperator.vmware.com", Version: "v1alpha6"})
+// that the conversion client will use when writing the object to the API server.
+// Returns an error if c is not a conversionClient or if the object type is not registered.
+func SpokeGroupVersionFor(c client.Client, obj runtime.Object) (schema.GroupVersion, error) {
+	cc, ok := c.(*conversionClient)
+	if !ok {
+		return schema.GroupVersion{}, errors.New("client is not a conversionClient")
+	}
+	gvk, err := cc.converter.SpokeGroupVersionKindFor(obj)
+	if err != nil {
+		return schema.GroupVersion{}, err
+	}
+	return gvk.GroupVersion(), nil
+}

@@ -24,14 +24,18 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	netopv1 "github.com/vmware-tanzu/net-operator-api/api/v1alpha1"
-	vmoprv1alpha5 "github.com/vmware-tanzu/vm-operator/api/v1alpha5"
+	vmoprv1alpha6 "github.com/vmware-tanzu/vm-operator/api/v1alpha6"
 	ncpv1 "github.com/vmware-tanzu/vm-operator/external/ncp/api/v1alpha1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
+	bootstrapv1 "sigs.k8s.io/cluster-api/api/bootstrap/kubeadm/v1beta2"
+	controlplanev1 "sigs.k8s.io/cluster-api/api/controlplane/kubeadm/v1beta2"
 	clusterv1 "sigs.k8s.io/cluster-api/api/core/v1beta2"
 	"sigs.k8s.io/cluster-api/util/conditions"
 	ctrlclient "sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
 	vmwarev1 "sigs.k8s.io/cluster-api-provider-vsphere/api/supervisor/v1beta2"
 	capvcontext "sigs.k8s.io/cluster-api-provider-vsphere/pkg/context"
@@ -84,12 +88,13 @@ func updateVMServiceWithVIP(ctx context.Context, clusterCtx *vmware.ClusterConte
 	vmService := getVirtualMachineService(ctx, clusterCtx, c, cpService)
 
 	// NOTE: use vm-operator native types for testing (the reconciler uses the internal hub version).
-	s := &vmoprv1alpha5.VirtualMachineService{}
+	// v1alpha6 is the native API server version on the supervisor.
+	s := &vmoprv1alpha6.VirtualMachineService{}
 	err := c.Get(ctx, ctrlclient.ObjectKeyFromObject(vmService), s)
 	Expect(err).ShouldNot(HaveOccurred())
 
 	sOriginal := s.DeepCopy()
-	s.Status.LoadBalancer.Ingress = []vmoprv1alpha5.LoadBalancerIngress{{IP: vip}}
+	s.Status.LoadBalancer.Ingress = []vmoprv1alpha6.LoadBalancerIngress{{IP: vip}}
 
 	err = c.Status().Patch(ctx, s, ctrlclient.MergeFrom(sOriginal))
 	Expect(err).ShouldNot(HaveOccurred())
@@ -398,5 +403,136 @@ var _ = Describe("ControlPlaneEndpoint Tests", func() {
 			apiEndpoint, err = cpService.ReconcileControlPlaneEndpointService(ctx, clusterCtx, nsxtProvider)
 			verifyOutput()
 		})
+	})
+})
+
+// buildKCPScheme 返回包含 KubeadmControlPlane 类型的 scheme，用于 ensureKCPReady 测试。
+func buildKCPScheme() *runtime.Scheme {
+	s := runtime.NewScheme()
+	_ = controlplanev1.AddToScheme(s)
+	_ = clusterv1.AddToScheme(s)
+	return s
+}
+
+// makeKCP 构造一个包含给定 certSANs 和 observedGeneration 的 KubeadmControlPlane。
+func makeKCP(namespace, name, clusterName string, generation, observedGen int64, certSANs []string) *controlplanev1.KubeadmControlPlane {
+	kcp := &controlplanev1.KubeadmControlPlane{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:       name,
+			Namespace:  namespace,
+			Generation: generation,
+			Labels: map[string]string{
+				clusterv1.ClusterNameLabel: clusterName,
+			},
+		},
+		Spec: controlplanev1.KubeadmControlPlaneSpec{
+			KubeadmConfigSpec: bootstrapv1.KubeadmConfigSpec{
+				ClusterConfiguration: &bootstrapv1.ClusterConfiguration{
+					APIServer: bootstrapv1.APIServer{
+						CertSANs: certSANs,
+					},
+				},
+			},
+		},
+		Status: controlplanev1.KubeadmControlPlaneStatus{
+			ObservedGeneration: observedGen,
+		},
+	}
+	return kcp
+}
+
+var _ = Describe("ensureKCPReadyForControlPlaneEndpoint", func() {
+	const (
+		ns          = "default"
+		clusterName = "test-cluster"
+		kcpName     = "test-cluster-kcp"
+		ipv4VIP     = "10.0.0.1"
+		ipv6VIP     = "fd00::1"
+	)
+
+	makeClusterCtx := func(clusterName string) *vmware.ClusterContext {
+		cluster := &clusterv1.Cluster{
+			ObjectMeta: metav1.ObjectMeta{Name: clusterName, Namespace: ns},
+		}
+		return &vmware.ClusterContext{Cluster: cluster}
+	}
+
+	It("should return nil when requiredIPs is empty", func() {
+		c := fake.NewClientBuilder().WithScheme(buildKCPScheme()).Build()
+		clusterCtx := makeClusterCtx(clusterName)
+		Expect(ensureKCPReadyForControlPlaneEndpoint(context.Background(), c, clusterCtx, nil)).To(Succeed())
+	})
+
+	It("should return nil when cluster is nil", func() {
+		c := fake.NewClientBuilder().WithScheme(buildKCPScheme()).Build()
+		Expect(ensureKCPReadyForControlPlaneEndpoint(context.Background(), c, &vmware.ClusterContext{Cluster: nil}, []string{ipv4VIP, ipv6VIP})).To(Succeed())
+	})
+
+	It("should return error when KCP not found for dual stack cluster (>1 requiredIPs)", func() {
+		c := fake.NewClientBuilder().WithScheme(buildKCPScheme()).Build()
+		clusterCtx := makeClusterCtx(clusterName)
+		err := ensureKCPReadyForControlPlaneEndpoint(context.Background(), c, clusterCtx, []string{ipv4VIP, ipv6VIP})
+		Expect(err).To(HaveOccurred())
+		Expect(err.Error()).To(ContainSubstring("KubeadmControlPlane not found"))
+	})
+
+	It("should return nil when KCP not found for single stack (1 requiredIP)", func() {
+		c := fake.NewClientBuilder().WithScheme(buildKCPScheme()).Build()
+		clusterCtx := makeClusterCtx(clusterName)
+		Expect(ensureKCPReadyForControlPlaneEndpoint(context.Background(), c, clusterCtx, []string{ipv4VIP})).To(Succeed())
+	})
+
+	It("should return error when multiple KCPs found", func() {
+		kcp1 := makeKCP(ns, kcpName+"-1", clusterName, 1, 1, []string{ipv4VIP, ipv6VIP})
+		kcp2 := makeKCP(ns, kcpName+"-2", clusterName, 1, 1, []string{ipv4VIP, ipv6VIP})
+		c := fake.NewClientBuilder().WithScheme(buildKCPScheme()).WithObjects(kcp1, kcp2).Build()
+		clusterCtx := makeClusterCtx(clusterName)
+		err := ensureKCPReadyForControlPlaneEndpoint(context.Background(), c, clusterCtx, []string{ipv4VIP, ipv6VIP})
+		Expect(err).To(HaveOccurred())
+		Expect(err.Error()).To(ContainSubstring("multiple KubeadmControlPlane"))
+	})
+
+	It("should return error when KCP observedGeneration does not match generation", func() {
+		kcp := makeKCP(ns, kcpName, clusterName, 2, 1 /* stale */, []string{ipv4VIP, ipv6VIP})
+		c := fake.NewClientBuilder().WithScheme(buildKCPScheme()).WithObjects(kcp).WithStatusSubresource(kcp).Build()
+		clusterCtx := makeClusterCtx(clusterName)
+		err := ensureKCPReadyForControlPlaneEndpoint(context.Background(), c, clusterCtx, []string{ipv4VIP, ipv6VIP})
+		Expect(err).To(HaveOccurred())
+		Expect(err.Error()).To(ContainSubstring("observedGeneration"))
+	})
+
+	It("should return error when certSANs missing IPv4 VIP", func() {
+		kcp := makeKCP(ns, kcpName, clusterName, 1, 1, []string{ipv6VIP}) // 缺少 ipv4VIP
+		c := fake.NewClientBuilder().WithScheme(buildKCPScheme()).WithObjects(kcp).WithStatusSubresource(kcp).Build()
+		clusterCtx := makeClusterCtx(clusterName)
+		err := ensureKCPReadyForControlPlaneEndpoint(context.Background(), c, clusterCtx, []string{ipv4VIP, ipv6VIP})
+		Expect(err).To(HaveOccurred())
+		Expect(err.Error()).To(ContainSubstring(ipv4VIP))
+	})
+
+	It("should return error when certSANs missing IPv6 VIP", func() {
+		kcp := makeKCP(ns, kcpName, clusterName, 1, 1, []string{ipv4VIP}) // 缺少 ipv6VIP
+		c := fake.NewClientBuilder().WithScheme(buildKCPScheme()).WithObjects(kcp).WithStatusSubresource(kcp).Build()
+		clusterCtx := makeClusterCtx(clusterName)
+		err := ensureKCPReadyForControlPlaneEndpoint(context.Background(), c, clusterCtx, []string{ipv4VIP, ipv6VIP})
+		Expect(err).To(HaveOccurred())
+		Expect(err.Error()).To(ContainSubstring(ipv6VIP))
+	})
+
+	It("should return nil when KCP has both VIPs in certSANs and observedGeneration matches", func() {
+		kcp := makeKCP(ns, kcpName, clusterName, 1, 1, []string{ipv4VIP, ipv6VIP})
+		c := fake.NewClientBuilder().WithScheme(buildKCPScheme()).WithObjects(kcp).WithStatusSubresource(kcp).Build()
+		clusterCtx := makeClusterCtx(clusterName)
+		Expect(ensureKCPReadyForControlPlaneEndpoint(context.Background(), c, clusterCtx, []string{ipv4VIP, ipv6VIP})).To(Succeed())
+	})
+
+	It("should skip gate check when KCP is being deleted", func() {
+		kcp := makeKCP(ns, kcpName, clusterName, 1, 0 /* stale */, nil /* no certSANs */)
+		now := metav1.Now()
+		kcp.DeletionTimestamp = &now
+		kcp.Finalizers = []string{"test-finalizer"}
+		c := fake.NewClientBuilder().WithScheme(buildKCPScheme()).WithObjects(kcp).WithStatusSubresource(kcp).Build()
+		clusterCtx := makeClusterCtx(clusterName)
+		Expect(ensureKCPReadyForControlPlaneEndpoint(context.Background(), c, clusterCtx, []string{ipv4VIP, ipv6VIP})).To(Succeed())
 	})
 })

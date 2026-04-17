@@ -66,6 +66,15 @@ const (
 	//
 	// beta: v1.16
 	ReconcilerRateLimiting featuregate.Feature = "ReconcilerRateLimiting"
+
+	// IPv6DualStack enables dual-stack (IPv4+IPv6) support for VKS clusters on the supervisor.
+	// When enabled, CAPV will:
+	//   - Configure VirtualMachineService with IPFamilyPolicy=RequireDualStack and ordered IPFamilies.
+	//   - Require both an IPv4 and IPv6 LoadBalancer VIP before setting the control plane endpoint.
+	//   - Gate setting the endpoint on KubeadmControlPlane having both VIPs in certSANs and
+	//     observedGeneration matching generation, to ensure TLS certificates cover both IP families.
+	// Requires vm-operator v1alpha6 or later on the supervisor.
+	IPv6DualStack featuregate.Feature = "IPv6DualStack"
 )
 
 func init() {
@@ -82,4 +91,5 @@ var defaultCAPVFeatureGates = map[featuregate.Feature]featuregate.FeatureSpec{
 	NodeAutoPlacement:      {Default: false, PreRelease: featuregate.Alpha},
 	MultiNetworks:          {Default: false, PreRelease: featuregate.Alpha},
 	VLANSubinterface:       {Default: false, PreRelease: featuregate.Alpha},
+	IPv6DualStack:          {Default: false, PreRelease: featuregate.Alpha},
 }

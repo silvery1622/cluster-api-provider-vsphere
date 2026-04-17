@@ -41,6 +41,8 @@ func convert_v1alpha6_VirtualMachineService_To_hub_VirtualMachineService(_ conte
 	}
 	dst.Spec.Selector = src.Spec.Selector
 	dst.Spec.Type = vmoprvhub.VirtualMachineServiceType(src.Spec.Type)
+	dst.Spec.IPFamilies = src.Spec.IPFamilies
+	dst.Spec.IPFamilyPolicy = src.Spec.IPFamilyPolicy
 
 	if src.Status.LoadBalancer.Ingress != nil {
 		dst.Status.LoadBalancer.Ingress = []vmoprvhub.LoadBalancerIngress{}
@@ -71,6 +73,8 @@ func convert_hub_VirtualMachineService_To_v1alpha6_VirtualMachineService(_ conte
 	}
 	dst.Spec.Selector = src.Spec.Selector
 	dst.Spec.Type = vmoprv1alpha6.VirtualMachineServiceType(src.Spec.Type)
+	dst.Spec.IPFamilies = src.Spec.IPFamilies
+	dst.Spec.IPFamilyPolicy = src.Spec.IPFamilyPolicy
 
 	if src.Status.LoadBalancer.Ingress != nil {
 		dst.Status.LoadBalancer.Ingress = []vmoprv1alpha6.LoadBalancerIngress{}

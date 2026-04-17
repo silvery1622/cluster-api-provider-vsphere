@@ -119,12 +119,15 @@ func convert_v1alpha6_VirtualMachine_To_hub_VirtualMachine(_ context.Context, sr
 						})
 					}
 				}
-				d.SearchDomains = iface.SearchDomains
-				dst.Spec.Network.Interfaces = append(dst.Spec.Network.Interfaces, d)
+			d.SearchDomains = iface.SearchDomains
+			if iface.IPFamilyPolicy != nil {
+				d.IPFamilyPolicy = string(*iface.IPFamilyPolicy)
 			}
+			dst.Spec.Network.Interfaces = append(dst.Spec.Network.Interfaces, d)
 		}
-		if src.Spec.Network.VLANs != nil {
-			dst.Spec.Network.VLANs = []vmoprvhub.VirtualMachineNetworkVLANSpec{}
+	}
+	if src.Spec.Network.VLANs != nil {
+		dst.Spec.Network.VLANs = []vmoprvhub.VirtualMachineNetworkVLANSpec{}
 			for _, vlan := range src.Spec.Network.VLANs {
 				dst.Spec.Network.VLANs = append(dst.Spec.Network.VLANs, vmoprvhub.VirtualMachineNetworkVLANSpec{
 					Name: vlan.Name,
@@ -363,12 +366,16 @@ func convert_hub_VirtualMachine_To_v1alpha6_VirtualMachine(_ context.Context, sr
 						})
 					}
 				}
-				d.SearchDomains = iface.SearchDomains
-				dst.Spec.Network.Interfaces = append(dst.Spec.Network.Interfaces, d)
+			d.SearchDomains = iface.SearchDomains
+			if iface.IPFamilyPolicy != "" {
+				p := vmoprv1alpha6.NetworkInterfaceIPFamilyPolicy(iface.IPFamilyPolicy)
+				d.IPFamilyPolicy = &p
 			}
+			dst.Spec.Network.Interfaces = append(dst.Spec.Network.Interfaces, d)
 		}
-		if src.Spec.Network.VLANs != nil {
-			dst.Spec.Network.VLANs = []vmoprv1alpha6.VirtualMachineNetworkVLANSpec{}
+	}
+	if src.Spec.Network.VLANs != nil {
+		dst.Spec.Network.VLANs = []vmoprv1alpha6.VirtualMachineNetworkVLANSpec{}
 			for _, vlan := range src.Spec.Network.VLANs {
 				dst.Spec.Network.VLANs = append(dst.Spec.Network.VLANs, vmoprv1alpha6.VirtualMachineNetworkVLANSpec{
 					Name: vlan.Name,
