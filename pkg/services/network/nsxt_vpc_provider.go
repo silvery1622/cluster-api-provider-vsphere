@@ -20,6 +20,7 @@ import (
 	"context"
 	"fmt"
 	"reflect"
+	"strings"
 
 	"github.com/pkg/errors"
 	nsxvpcv1 "github.com/vmware-tanzu/nsx-operator/pkg/apis/vpc/v1alpha1"
@@ -117,6 +118,45 @@ func createSubnetSet(clusterCtx *vmware.ClusterContext) bool {
 	return ptr.Deref(clusterCtx.VSphereCluster.Spec.Network.NSXVPC.CreateSubnetSet, true)
 }
 
+// subnetSetIPAddressType returns the IPAddressType to configure on the SubnetSet based on the
+// cluster's CIDR configuration. It returns ("", false) when the IPv6DualStack feature gate is
+// disabled, in which case the caller must leave IPAddressType unset (preserving the current
+// behavior of an empty SubnetSetSpec).
+//
+// When the feature gate is enabled the mapping is:
+//
+//	dual-stack CIDRs  → IPV4IPV6
+//	IPv6-only CIDRs   → IPV6
+//	IPv4-only or none → IPV4 (safe default)
+func subnetSetIPAddressType(cluster *clusterv1.Cluster) (nsxvpcv1.IPAddressType, bool) {
+	if !feature.Gates.Enabled(feature.IPv6DualStack) {
+		return "", false
+	}
+	if cluster == nil {
+		return nsxvpcv1.IPAddressTypeIPv4, true
+	}
+	cidrBlocks := cluster.Spec.ClusterNetwork.Pods.CIDRBlocks
+	if len(cidrBlocks) == 0 {
+		cidrBlocks = cluster.Spec.ClusterNetwork.Services.CIDRBlocks
+	}
+	var hasIPv4, hasIPv6 bool
+	for _, cidr := range cidrBlocks {
+		if strings.Contains(cidr, ":") {
+			hasIPv6 = true
+		} else {
+			hasIPv4 = true
+		}
+	}
+	switch {
+	case hasIPv4 && hasIPv6:
+		return nsxvpcv1.IPAddressTypeIPv4IPv6, true
+	case hasIPv6:
+		return nsxvpcv1.IPAddressTypeIPv6, true
+	default:
+		return nsxvpcv1.IPAddressTypeIPv4, true
+	}
+}
+
 // VerifyNetworkStatus checks if the given runtime object is of type SubnetSet.
 // If it is, then it calls verifyNsxVpcSubnetSetStatus with the SubnetSet to verify its status.
 // If it's not, it returns an error.
@@ -177,6 +217,11 @@ func (vp *nsxtVPCNetworkProvider) ProvisionClusterNetwork(ctx context.Context, c
 		subnetSetExists = false
 	}
 	originalSubnetSet := subnetset.DeepCopy()
+
+	// Set IPAddressType after loading the existing state so the patch diff captures any change.
+	if ipAddrType, ok := subnetSetIPAddressType(clusterCtx.Cluster); ok {
+		subnetset.Spec.IPAddressType = ipAddrType
+	}
 
 	if err := ctrlutil.SetOwnerReference(
 		clusterCtx.VSphereCluster,

@@ -39,6 +39,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
 	vmwarev1 "sigs.k8s.io/cluster-api-provider-vsphere/api/supervisor/v1beta2"
+	"sigs.k8s.io/cluster-api-provider-vsphere/feature"
 	"sigs.k8s.io/cluster-api-provider-vsphere/pkg/context/vmware"
 	vmoprvhub "sigs.k8s.io/cluster-api-provider-vsphere/pkg/conversion/api/vmoperator/hub"
 	"sigs.k8s.io/cluster-api-provider-vsphere/pkg/services"
@@ -1089,6 +1090,83 @@ var _ = Describe("Network provider", func() {
 				Expect(err).ToNot(HaveOccurred())
 			})
 		})
+
+		Context("with NSX-VPC network provider and IPv6DualStack feature gate enabled", func() {
+			var nsxvpcNp *nsxtVPCNetworkProvider
+
+			BeforeEach(func() {
+				Expect(feature.MutableGates.Set("IPv6DualStack=true")).To(Succeed())
+				client = fake.NewClientBuilder().WithScheme(scheme).WithRuntimeObjects(configmapObj, systemNamespaceObj).Build()
+				nsxvpcNp, _ = NSXTVpcNetworkProvider(client).(*nsxtVPCNetworkProvider)
+			})
+
+			AfterEach(func() {
+				Expect(feature.MutableGates.Set("IPv6DualStack=false")).To(Succeed())
+			})
+
+			DescribeTable("should create SubnetSet with correct IPAddressType",
+				func(podCIDRs []string, expectedIPAddrType nsxvpcv1.IPAddressType) {
+					cluster.Spec.ClusterNetwork = clusterv1.ClusterNetwork{
+						Pods: clusterv1.NetworkRanges{CIDRBlocks: podCIDRs},
+					}
+					clusterCtx.Cluster = cluster
+
+					mocknp := &MockNSXTVpcNetworkProvider{nsxvpcNp}
+					Expect(mocknp.ProvisionClusterNetwork(ctx, clusterCtx)).To(Succeed())
+
+					createdSubnetSet := &nsxvpcv1.SubnetSet{}
+					Expect(client.Get(ctx, apitypes.NamespacedName{
+						Name:      dummyCluster,
+						Namespace: dummyNs,
+					}, createdSubnetSet)).To(Succeed())
+					Expect(createdSubnetSet.Spec.IPAddressType).To(Equal(expectedIPAddrType))
+				},
+				Entry("IPv4-only CIDRs → IPv4",
+					[]string{"192.168.0.0/16"},
+					nsxvpcv1.IPAddressTypeIPv4,
+				),
+				Entry("IPv6-only CIDRs → IPv6",
+					[]string{"fd00::/48"},
+					nsxvpcv1.IPAddressTypeIPv6,
+				),
+				Entry("dual-stack CIDRs → IPV4IPV6",
+					[]string{"192.168.0.0/16", "fd00::/48"},
+					nsxvpcv1.IPAddressTypeIPv4IPv6,
+				),
+				Entry("no CIDRs → IPv4 (safe default)",
+					[]string{},
+					nsxvpcv1.IPAddressTypeIPv4,
+				),
+			)
+
+			It("should update an existing SubnetSet IPAddressType when it changes", func() {
+				// Pre-create a SubnetSet with no IPAddressType (simulating an existing IPv4 cluster)
+				existingSubnetSet := &nsxvpcv1.SubnetSet{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      dummyCluster,
+						Namespace: dummyNs,
+					},
+					Spec: nsxvpcv1.SubnetSetSpec{},
+				}
+				Expect(client.Create(ctx, existingSubnetSet)).To(Succeed())
+
+				// Now reconcile with a dual-stack cluster
+				cluster.Spec.ClusterNetwork = clusterv1.ClusterNetwork{
+					Pods: clusterv1.NetworkRanges{CIDRBlocks: []string{"192.168.0.0/16", "fd00::/48"}},
+				}
+				clusterCtx.Cluster = cluster
+
+				mocknp := &MockNSXTVpcNetworkProvider{nsxvpcNp}
+				Expect(mocknp.ProvisionClusterNetwork(ctx, clusterCtx)).To(Succeed())
+
+				updatedSubnetSet := &nsxvpcv1.SubnetSet{}
+				Expect(client.Get(ctx, apitypes.NamespacedName{
+					Name:      dummyCluster,
+					Namespace: dummyNs,
+				}, updatedSubnetSet)).To(Succeed())
+				Expect(updatedSubnetSet.Spec.IPAddressType).To(Equal(nsxvpcv1.IPAddressTypeIPv4IPv6))
+			})
+		})
 	})
 
 	Context("GetVMServiceAnnotations", func() {
@@ -1178,6 +1256,83 @@ var _ = Describe("Network provider", func() {
 			It("should have a loadbalancer", func() {
 				Expect(hasLB).To(BeTrue())
 			})
+		})
+	})
+})
+
+var _ = Describe("subnetSetIPAddressType", func() {
+	AfterEach(func() {
+		Expect(feature.MutableGates.Set("IPv6DualStack=false")).To(Succeed())
+	})
+
+	Context("when IPv6DualStack feature gate is disabled", func() {
+		It("returns empty string and false for any cluster", func() {
+			cluster := &clusterv1.Cluster{
+				Spec: clusterv1.ClusterSpec{
+					ClusterNetwork: clusterv1.ClusterNetwork{
+						Pods: clusterv1.NetworkRanges{CIDRBlocks: []string{"192.168.0.0/16"}},
+					},
+				},
+			}
+			ipAddrType, ok := subnetSetIPAddressType(cluster)
+			Expect(ok).To(BeFalse())
+			Expect(ipAddrType).To(BeEmpty())
+		})
+	})
+
+	Context("when IPv6DualStack feature gate is enabled", func() {
+		BeforeEach(func() {
+			Expect(feature.MutableGates.Set("IPv6DualStack=true")).To(Succeed())
+		})
+
+		DescribeTable("derives IPAddressType from cluster CIDRs",
+			func(podCIDRs []string, serviceCIDRs []string, expected nsxvpcv1.IPAddressType) {
+				cluster := &clusterv1.Cluster{
+					Spec: clusterv1.ClusterSpec{
+						ClusterNetwork: clusterv1.ClusterNetwork{
+							Pods:     clusterv1.NetworkRanges{CIDRBlocks: podCIDRs},
+							Services: clusterv1.NetworkRanges{CIDRBlocks: serviceCIDRs},
+						},
+					},
+				}
+				ipAddrType, ok := subnetSetIPAddressType(cluster)
+				Expect(ok).To(BeTrue())
+				Expect(ipAddrType).To(Equal(expected))
+			},
+			Entry("IPv4-only pod CIDRs → IPv4",
+				[]string{"192.168.0.0/16"}, nil,
+				nsxvpcv1.IPAddressTypeIPv4,
+			),
+			Entry("IPv6-only pod CIDRs → IPv6",
+				[]string{"fd00::/48"}, nil,
+				nsxvpcv1.IPAddressTypeIPv6,
+			),
+			Entry("dual-stack pod CIDRs → IPV4IPV6",
+				[]string{"192.168.0.0/16", "fd00::/48"}, nil,
+				nsxvpcv1.IPAddressTypeIPv4IPv6,
+			),
+			Entry("no pod CIDRs, IPv4 service CIDRs → IPv4",
+				nil, []string{"10.96.0.0/12"},
+				nsxvpcv1.IPAddressTypeIPv4,
+			),
+			Entry("no pod CIDRs, IPv6 service CIDRs → IPv6",
+				nil, []string{"fd01::/112"},
+				nsxvpcv1.IPAddressTypeIPv6,
+			),
+			Entry("no pod CIDRs, dual-stack service CIDRs → IPV4IPV6",
+				nil, []string{"10.96.0.0/12", "fd01::/112"},
+				nsxvpcv1.IPAddressTypeIPv4IPv6,
+			),
+			Entry("no CIDRs at all → IPv4 (safe default)",
+				nil, nil,
+				nsxvpcv1.IPAddressTypeIPv4,
+			),
+		)
+
+		It("returns IPv4 and true for a nil cluster", func() {
+			ipAddrType, ok := subnetSetIPAddressType(nil)
+			Expect(ok).To(BeTrue())
+			Expect(ipAddrType).To(Equal(nsxvpcv1.IPAddressTypeIPv4))
 		})
 	})
 })
