@@ -160,7 +160,11 @@ func (np *nsxtNetworkProvider) ProvisionClusterNetwork(ctx context.Context, clus
 			log.V(4).Info("Got system namespace snat ip", "ip", systemNSSnatIP)
 
 			// WhitelistSourceRanges accept cidrs only
-			vnet.Spec.WhitelistSourceRanges = systemNSSnatIP + "/32"
+			cidrSuffix := "/32"
+			if util.IsIPv6(systemNSSnatIP) {
+				cidrSuffix = "/128"
+			}
+			vnet.Spec.WhitelistSourceRanges = systemNSSnatIP + cidrSuffix
 		}
 	}
 

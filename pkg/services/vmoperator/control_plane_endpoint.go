@@ -20,6 +20,7 @@ import (
 	"context"
 	"fmt"
 	"reflect"
+	"strings"
 
 	"github.com/pkg/errors"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -310,14 +311,35 @@ func getVMServiceVIP(vmService *vmoprvhub.VirtualMachineService) (string, error)
 		return "", fmt.Errorf("VirtualMachineService for control plane does not have load balancer")
 	}
 
+	// Collect all available IPs
+	var ipv4Addr, ipv6Addr string
 	for _, ingress := range vmService.Status.LoadBalancer.Ingress {
 		if ingress.IP != "" {
-			return ingress.IP, nil
+			// Determine if this is IPv4 or IPv6
+			if strings.Contains(ingress.IP, ":") {
+				// IPv6 address
+				if ipv6Addr == "" {
+					ipv6Addr = ingress.IP
+				}
+			} else {
+				// IPv4 address
+				if ipv4Addr == "" {
+					ipv4Addr = ingress.IP
+				}
+			}
 		}
 		// BMV: Supported?
 		// if ingress.Hostname != "" {
 		// 	return ingress.Hostname, nil
 		// }
+	}
+
+	// Prefer IPv4 for backward compatibility, fallback to IPv6
+	if ipv4Addr != "" {
+		return ipv4Addr, nil
+	}
+	if ipv6Addr != "" {
+		return ipv6Addr, nil
 	}
 
 	return "", fmt.Errorf("VirtualMachineService LoadBalancer does not have any Ingresses")

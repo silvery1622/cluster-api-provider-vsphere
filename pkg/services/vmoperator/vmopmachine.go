@@ -769,20 +769,32 @@ func (v *VmopMachineService) reconcileNetwork(supervisorMachineCtx *vmware.Super
 		return false
 	}
 
-	ipAddr := vm.Status.Network.PrimaryIP4
-	if ipAddr == "" {
-		ipAddr = vm.Status.Network.PrimaryIP6
+	// Select primary IP address. Prefer IPv4 for backward compatibility.
+	// In dual-stack scenarios, both addresses will be added to Status.Addresses.
+	var primaryIP string
+	var addresses []clusterv1.MachineAddress
+
+	if vm.Status.Network.PrimaryIP4 != "" {
+		primaryIP = vm.Status.Network.PrimaryIP4
+		addresses = append(addresses, clusterv1.MachineAddress{
+			Type:    clusterv1.MachineInternalIP,
+			Address: vm.Status.Network.PrimaryIP4,
+		})
 	}
 
-	// Cluster API requires InfrastructureMachineStatus.Addresses to be set
-	if ipAddr != "" {
-		supervisorMachineCtx.VSphereMachine.Status.Addresses = []clusterv1.MachineAddress{
-			{
-				Type:    clusterv1.MachineInternalIP,
-				Address: ipAddr,
-			},
+	if vm.Status.Network.PrimaryIP6 != "" {
+		// If no IPv4, use IPv6 as primary
+		if primaryIP == "" {
+			primaryIP = vm.Status.Network.PrimaryIP6
 		}
+		addresses = append(addresses, clusterv1.MachineAddress{
+			Type:    clusterv1.MachineInternalIP,
+			Address: vm.Status.Network.PrimaryIP6,
+		})
 	}
+
+	supervisorMachineCtx.VSphereMachine.Status.IPAddr = primaryIP
+	supervisorMachineCtx.VSphereMachine.Status.Addresses = addresses
 
 	return true
 }

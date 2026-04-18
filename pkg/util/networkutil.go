@@ -18,6 +18,7 @@ package util
 
 import (
 	"context"
+	"net"
 	"strings"
 
 	"github.com/blang/semver/v4"
@@ -114,4 +115,10 @@ func NCPSupportFW(ctx context.Context, controllerClient client.Client) (bool, er
 	}
 	supported := currVersion.GTE(NCPVersionSupportFWSemver) && currVersion.LT(NCPVersionSupportFWEndedSemver)
 	return supported, nil
+}
+
+// IsIPv6 checks if the given IP address string is an IPv6 address.
+func IsIPv6(ipAddr string) bool {
+	ip := net.ParseIP(ipAddr)
+	return ip != nil && ip.To4() == nil
 }
