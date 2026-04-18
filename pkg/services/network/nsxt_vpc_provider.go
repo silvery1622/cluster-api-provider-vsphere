@@ -282,7 +282,7 @@ func (vp *nsxtVPCNetworkProvider) ConfigureVirtualMachine(_ context.Context, clu
 			return errors.New("primary interface can not be configured when createSubnetSet is true")
 		}
 		networkName := clusterCtx.VSphereCluster.Name
-		vm.Spec.Network.Interfaces = append(vm.Spec.Network.Interfaces, vmoprvhub.VirtualMachineNetworkInterfaceSpec{
+		vmInterface := vmoprvhub.VirtualMachineNetworkInterfaceSpec{
 			Name: PrimaryInterfaceName,
 			Network: &vmoprvhub.PartialObjectRef{
 				TypeMeta: metav1.TypeMeta{
@@ -291,7 +291,16 @@ func (vp *nsxtVPCNetworkProvider) ConfigureVirtualMachine(_ context.Context, clu
 				},
 				Name: networkName,
 			},
-		})
+		}
+		// When the cluster is dual-stack, explicitly request dual-stack on the SubnetPort
+		// so the NSX Operator allocates both IPv4 and IPv6 addresses. Without this the
+		// NSX Operator defaults to IPv4 even when the SubnetSet is configured for dual-stack.
+		if ipAddrType, ok := subnetSetIPAddressType(clusterCtx.Cluster); ok && ipAddrType == nsxvpcv1.IPAddressTypeIPv4IPv6 {
+			// v1alpha6 NetworkInterfaceIPFamilyPolicy valid values: "IPv4Only", "IPv6Only", "DualStack".
+			// "DualStack" maps to RequireDualStack semantics in the NSX Operator context.
+			vmInterface.IPFamilyPolicy = "DualStack"
+		}
+		vm.Spec.Network.Interfaces = append(vm.Spec.Network.Interfaces, vmInterface)
 	} else {
 		if !machine.Spec.Network.Interfaces.Primary.IsDefined() {
 			return errors.New("primary interface must be configured when createSubnetSet is false")
@@ -311,6 +320,9 @@ func (vp *nsxtVPCNetworkProvider) ConfigureVirtualMachine(_ context.Context, clu
 				Name: primary.NetworkRef.Name,
 			},
 			MTU: mtu,
+		}
+		if feature.Gates.Enabled(feature.IPv6DualStack) {
+			vmInterface.IPFamilyPolicy = primary.IPFamilyPolicy
 		}
 		setRoutes(&vmInterface, primary.Routes)
 		vm.Spec.Network.Interfaces = append(vm.Spec.Network.Interfaces, vmInterface)
@@ -374,6 +386,9 @@ func setVMSecondaryInterfaces(machine *vmwarev1.VSphereMachine, vm *vmoprvhub.Vi
 			MTU:      mtu,
 			Gateway4: "None",
 			Gateway6: "None",
+		}
+		if feature.Gates.Enabled(feature.IPv6DualStack) {
+			vmInterface.IPFamilyPolicy = secondaryInterface.IPFamilyPolicy
 		}
 		setRoutes(&vmInterface, secondaryInterface.Routes)
 		vm.Spec.Network.Interfaces = append(vm.Spec.Network.Interfaces, vmInterface)

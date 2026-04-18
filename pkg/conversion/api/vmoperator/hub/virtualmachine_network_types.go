@@ -188,6 +188,15 @@ type VirtualMachineNetworkInterfaceSpec struct {
 	// or true, if search domains is not provided, the global search domains
 	// will be used instead.
 	SearchDomains []string `json:"searchDomains,omitempty"`
+
+	// IPFamilyPolicy specifies the IP family policy for this network interface.
+	// Valid values are "IPv4Only", "IPv6Only", and "DualStack" (vm-operator v1alpha6 semantics).
+	// When set to "DualStack", the NSX Operator will allocate both an
+	// IPv4 and an IPv6 address for the SubnetPort backing this interface.
+	// If not set, the NSX Operator defaults to IPv4.
+	//
+	// +optional
+	IPFamilyPolicy string `json:"ipFamilyPolicy,omitempty"`
 }
 
 // VirtualMachineNetworkVLANSpec describes a VLAN sub-interface configuration.
@@ -218,12 +227,12 @@ type VirtualMachineNetworkSpec struct {
 	// virtual machine may not have more than 10 virtual ethernet card devices.
 	Interfaces []VirtualMachineNetworkInterfaceSpec `json:"interfaces,omitempty"`
 
+	// VLANs is a list of VLAN interfaces to be configured on top of the
+	// physical network interfaces.
+	//
 	// +optional
 	// +listType=map
 	// +listMapKey=name
-
-	// VLANs is a list of VLAN interfaces to be configured on top of the
-	// physical network interfaces.
 	VLANs []VirtualMachineNetworkVLANSpec `json:"vlans,omitempty"`
 }
 

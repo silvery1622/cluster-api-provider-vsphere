@@ -209,6 +209,15 @@ type InterfaceSpec struct {
 	// +listType=atomic
 	// +optional
 	Routes []RouteSpec `json:"routes,omitempty"`
+
+	// ipFamilyPolicy specifies the IP family policy for this network interface.
+	// Valid values are "IPv4Only", "IPv6Only", and "DualStack" (vm-operator v1alpha6 semantics).
+	// When set to "DualStack", the NSX Operator will allocate both an
+	// IPv4 and an IPv6 address for the SubnetPort backing this interface.
+	// If not set, the NSX Operator defaults to IPv4.
+	//
+	// +optional
+	IPFamilyPolicy string `json:"ipFamilyPolicy,omitempty"`
 }
 
 // IsDefined returns true if the InterfaceSpec is defined.

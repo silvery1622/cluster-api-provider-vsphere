@@ -463,6 +463,7 @@ func autoConvert_v1beta1_InterfaceSpec_To_v1beta2_InterfaceSpec(in *InterfaceSpe
 	// WARNING: in.Network requires manual conversion: does not exist in peer-type
 	out.MTU = in.MTU
 	out.Routes = *(*[]v1beta2.RouteSpec)(unsafe.Pointer(&in.Routes))
+	out.IPFamilyPolicy = in.IPFamilyPolicy
 	return nil
 }
 
@@ -470,6 +471,7 @@ func autoConvert_v1beta2_InterfaceSpec_To_v1beta1_InterfaceSpec(in *v1beta2.Inte
 	// WARNING: in.NetworkRef requires manual conversion: does not exist in peer-type
 	out.MTU = in.MTU
 	out.Routes = *(*[]RouteSpec)(unsafe.Pointer(&in.Routes))
+	out.IPFamilyPolicy = in.IPFamilyPolicy
 	return nil
 }
 

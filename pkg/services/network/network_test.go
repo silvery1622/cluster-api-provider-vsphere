@@ -1166,6 +1166,32 @@ var _ = Describe("Network provider", func() {
 				}, updatedSubnetSet)).To(Succeed())
 				Expect(updatedSubnetSet.Spec.IPAddressType).To(Equal(nsxvpcv1.IPAddressTypeIPv4IPv6))
 			})
+
+			DescribeTable("ConfigureVirtualMachine 应根据 IP family 设置正确的 IPFamilyPolicy",
+				func(podCIDRs []string, expectedIPFamilyPolicy string) {
+					cluster.Spec.ClusterNetwork = clusterv1.ClusterNetwork{
+						Pods: clusterv1.NetworkRanges{CIDRBlocks: podCIDRs},
+					}
+					clusterCtx.Cluster = cluster
+					vm := &vmoprvhub.VirtualMachine{}
+					Expect(nsxvpcNp.ConfigureVirtualMachine(ctx, clusterCtx, machine, vm)).To(Succeed())
+					Expect(vm.Spec.Network).ToNot(BeNil())
+					Expect(vm.Spec.Network.Interfaces).To(HaveLen(1))
+					Expect(vm.Spec.Network.Interfaces[0].IPFamilyPolicy).To(Equal(expectedIPFamilyPolicy))
+				},
+				Entry("IPv4-only 集群主网卡不设 IPFamilyPolicy",
+					[]string{"192.168.0.0/16"},
+					"",
+				),
+			Entry("IPv6-only 集群主网卡不自动设 DualStack",
+				[]string{"fd00::/48"},
+				"",
+			),
+			Entry("双栈集群主网卡应设 DualStack",
+				[]string{"192.168.0.0/16", "fd00::/48"},
+				"DualStack",
+			),
+			)
 		})
 	})
 
