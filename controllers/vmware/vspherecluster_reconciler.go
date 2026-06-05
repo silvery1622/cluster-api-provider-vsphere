@@ -20,8 +20,10 @@ package vmware
 import (
 	"cmp"
 	"context"
+	goerrors "errors"
 	"fmt"
 	"slices"
+	"time"
 
 	"github.com/pkg/errors"
 	topologyv1 "github.com/vmware-tanzu/vm-operator/external/tanzu-topology/api/v1alpha1"
@@ -139,8 +141,15 @@ func (r *ClusterReconciler) Reconcile(ctx context.Context, req ctrl.Request) (_ 
 		return reconcile.Result{}, nil
 	}
 
-	// Handle non-deleted clusters
-	return ctrl.Result{}, r.reconcileNormal(ctx, clusterContext)
+	// Handle non-deleted cluster
+	if err := r.reconcileNormal(ctx, clusterContext); err != nil {
+		// Requeue with short delay when waiting for KCP (e.g. observedGeneration to match); avoid long backoff.
+		if goerrors.Is(err, services.ErrWaitingForKCPReady) {
+			return ctrl.Result{RequeueAfter: 15 * time.Second}, nil
+		}
+		return ctrl.Result{}, err
+	}
+	return ctrl.Result{}, nil
 }
 
 func (r *ClusterReconciler) patch(ctx context.Context, clusterCtx *vmware.ClusterContext) error {
