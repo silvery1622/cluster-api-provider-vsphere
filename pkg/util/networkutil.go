@@ -25,6 +25,10 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	apitypes "k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+
+	"sigs.k8s.io/cluster-api-provider-vsphere/feature"
+	vmoprvhub "sigs.k8s.io/cluster-api-provider-vsphere/pkg/conversion/api/vmoperator/hub"
+	conversionclient "sigs.k8s.io/cluster-api-provider-vsphere/pkg/conversion/client"
 )
 
 const (
@@ -114,4 +118,17 @@ func NCPSupportFW(ctx context.Context, controllerClient client.Client) (bool, er
 	}
 	supported := currVersion.GTE(NCPVersionSupportFWSemver) && currVersion.LT(NCPVersionSupportFWEndedSemver)
 	return supported, nil
+}
+
+// IsDualStackSupported returns true if the VirtualMachineService API version and the feature gate support dual stack.
+func IsDualStackSupported(c client.Client) (bool, error) {
+	if !feature.Gates.Enabled(feature.IPv6DualStack) {
+		return false, nil
+	}
+
+	gv, err := conversionclient.SpokeGroupVersionFor(c, &vmoprvhub.VirtualMachineService{})
+	if err != nil {
+		return false, err
+	}
+	return gv.Version == "v1alpha6", nil
 }

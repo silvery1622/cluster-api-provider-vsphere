@@ -55,6 +55,10 @@ func NSXTVpcNetworkProvider(client client.Client) services.NetworkProvider {
 	}
 }
 
+func (vp *nsxtVPCNetworkProvider) SupportsIPv6DualStack() bool {
+	return false
+}
+
 func (vp *nsxtVPCNetworkProvider) HasLoadBalancer() bool {
 	return true
 }

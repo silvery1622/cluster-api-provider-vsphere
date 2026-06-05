@@ -21,7 +21,7 @@ spec:
         - "--diagnostics-address=${CAPI_DIAGNOSTICS_ADDRESS:=:8443}"
         - "--insecure-diagnostics=${CAPI_INSECURE_DIAGNOSTICS:=false}"
         - --v=4
-        - "--feature-gates=PriorityQueue=${EXP_PRIORITY_QUEUE:=true},ReconcilerRateLimiting=${EXP_RECONCILER_RATE_LIMITING:=true},NodeAntiAffinity=${EXP_NODE_ANTI_AFFINITY:=false}"
+        - "--feature-gates=PriorityQueue=${EXP_PRIORITY_QUEUE:=true},ReconcilerRateLimiting=${EXP_RECONCILER_RATE_LIMITING:=true},NodeAntiAffinity=${EXP_NODE_ANTI_AFFINITY:=false},DualStack=${EXP_DUAL_STACK:=false}"
         image: controller:latest
         imagePullPolicy: IfNotPresent
         name: manager

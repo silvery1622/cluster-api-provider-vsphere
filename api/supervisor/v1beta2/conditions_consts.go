@@ -56,6 +56,10 @@ const (
 	// WaitingForLoadBalancerIPV1Beta1Reason is used when waiting for load
 	// balancer IP to exist.
 	WaitingForLoadBalancerIPV1Beta1Reason = "WaitingForLoadBalancerIP"
+
+	// WaitingForKCPReadyV1Beta1Reason is used when waiting for KubeadmControlPlane to have
+	// correct certSANs and observedGeneration equal to generation.
+	WaitingForKCPReadyV1Beta1Reason = "WaitingForKCPReady"
 )
 
 // Conditions and condition Reasons for VSphereMachine.

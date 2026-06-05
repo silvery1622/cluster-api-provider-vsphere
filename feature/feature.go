@@ -68,6 +68,15 @@ const (
 	//
 	// beta: v1.16
 	ReconcilerRateLimiting featuregate.Feature = "ReconcilerRateLimiting"
+
+	// IPv6DualStack enables IPv6 and dualstack support for clusters with NSX-VPC network provider.
+	// When enabled, CAPV will handle dualstack clusters:
+	//   - Configure VirtualMachineService with IPFamilyPolicy=RequireDualStack and ordered IPFamilies.
+	//   - Require both an IPv4 and IPv6 LoadBalancer VIP before setting the control plane endpoint.
+	//   - Gate setting the endpoint on KubeadmControlPlane having both VIPs in certSANs and
+	//     observedGeneration matching generation, to ensure TLS certificates cover both IP families.
+	// Requires vm-operator v1alpha6 or later on the supervisor.
+	IPv6DualStack featuregate.Feature = "IPv6DualStack"
 )
 
 var (
@@ -84,6 +93,7 @@ var (
 		NamespaceScopedZones: {Default: false, PreRelease: featuregate.Alpha},
 		NodeAutoPlacement:    {Default: false, PreRelease: featuregate.Alpha},
 		MultiNetworks:        {Default: false, PreRelease: featuregate.Alpha},
+		IPv6DualStack:        {Default: false, PreRelease: featuregate.Alpha},
 	}
 
 	supervisorVersionedGates = map[featuregate.Feature]featuregate.VersionedSpecs{
