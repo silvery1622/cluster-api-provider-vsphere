@@ -118,7 +118,7 @@ func Convert_v1beta1_VSphereClusterStatus_To_v1beta2_VSphereClusterStatus(in *VS
 			fd := in.FailureDomains[name]
 			out.FailureDomains = append(out.FailureDomains, clusterv1.FailureDomain{
 				Name:         name,
-				ControlPlane: new(fd.ControlPlane),
+				ControlPlane: ptrTo(fd.ControlPlane),
 				Attributes:   fd.Attributes,
 			})
 		}
@@ -515,7 +515,7 @@ func Convert_v1beta2_IPPoolReference_To_v1_TypedLocalObjectReference(in *infrav1
 	out.Kind = in.Kind
 	out.Name = in.Name
 	if in.APIGroup != "" {
-		out.APIGroup = new(in.APIGroup)
+		out.APIGroup = ptrTo(in.APIGroup)
 	}
 	return nil
 }
@@ -525,4 +525,8 @@ func deref[T any](ptr *T, def T) T {
 		return *ptr
 	}
 	return def
+}
+
+func ptrTo[T any](v T) *T {
+	return &v
 }

@@ -92,7 +92,7 @@ func Convert_v1beta1_VSphereClusterStatus_To_v1beta2_VSphereClusterStatus(in *VS
 			fd := in.FailureDomains[name]
 			out.FailureDomains = append(out.FailureDomains, clusterv1.FailureDomain{
 				Name:         name,
-				ControlPlane: new(fd.ControlPlane),
+				ControlPlane: ptrTo(fd.ControlPlane),
 				Attributes:   fd.Attributes,
 			})
 		}
@@ -181,7 +181,7 @@ func Convert_v1beta2_VSphereMachineStatus_To_v1beta1_VSphereMachineStatus(in *vm
 		return err
 	}
 
-	out.ID = new(in.BiosUUID)
+	out.ID = ptrTo(in.BiosUUID)
 	switch in.Phase {
 	case vmwarev1.VSphereMachinePhaseNotFound:
 		out.VMStatus = VirtualMachineStateNotFound
@@ -309,4 +309,8 @@ func deref[T any](ptr *T, def T) T {
 		return *ptr
 	}
 	return def
+}
+
+func ptrTo[T any](v T) *T {
+	return &v
 }
