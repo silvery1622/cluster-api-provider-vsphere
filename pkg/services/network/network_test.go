@@ -17,6 +17,8 @@ limitations under the License.
 package network
 
 import (
+	"sigs.k8s.io/cluster-api-provider-vsphere/feature"
+	"k8s.io/component-base/featuregate"
 	"context"
 	"fmt"
 	"strings"
@@ -970,6 +972,10 @@ var _ = Describe("Network provider", func() {
 					Namespace: dummyNs,
 				}, createdSubnetSet)
 				Expect(err).ToNot(HaveOccurred())
+				// The default IPAddressType is empty (or IPv4 by default if dual stack is not supported),
+				// however since the tests don't mock SpokeGroupVersionFor returning v1alpha6,
+				// dualStackSupported evaluates to false and IPAddressType is not set.
+				Expect(createdSubnetSet.Spec.IPAddressType).To(BeEmpty())
 			})
 		})
 
@@ -1179,5 +1185,85 @@ var _ = Describe("Network provider", func() {
 				Expect(hasLB).To(BeTrue())
 			})
 		})
+	})
+})
+
+var _ = Describe("NSXT VPC Provider DualStack", func() {
+	var (
+		ctx            context.Context
+		scheme         *runtime.Scheme
+		vp             *nsxtVPCNetworkProvider
+		clusterCtx     *vmware.ClusterContext
+		dummyNs        = "dummy-ns"
+		dummyCluster   = "dummy-cluster"
+		oldGates       map[string]bool
+	)
+
+	BeforeEach(func() {
+		ctx = context.Background()
+		scheme = runtime.NewScheme()
+		Expect(vmwarev1.AddToScheme(scheme)).To(Succeed())
+		Expect(nsxvpcv1.AddToScheme(scheme)).To(Succeed())
+		Expect(vmoprvhub.AddToScheme(scheme)).To(Succeed())
+
+		// Setup cluster context
+		cluster := &clusterv1.Cluster{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      dummyCluster,
+				Namespace: dummyNs,
+			},
+			Spec: clusterv1.ClusterSpec{
+				ClusterNetwork: clusterv1.ClusterNetwork{
+					Pods: clusterv1.NetworkRanges{
+						CIDRBlocks: []string{"10.0.0.0/16", "fd00::/64"},
+					},
+				},
+			},
+		}
+		vsphereCluster := &vmwarev1.VSphereCluster{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      dummyCluster,
+				Namespace: dummyNs,
+			},
+		}
+		clusterCtx, _ = util.CreateClusterContext(cluster, vsphereCluster)
+
+		// Save old gates and enable dual stack
+		oldGates = make(map[string]bool)
+		oldGates[string(feature.IPv6DualStack)] = feature.Gates.Enabled(feature.IPv6DualStack)
+		feature.Gates.(featuregate.MutableFeatureGate).Set("IPv6DualStack=true")
+	})
+
+	AfterEach(func() {
+		// Restore gates
+		for k, v := range oldGates {
+			val := "false"
+			if v {
+				val = "true"
+			}
+			feature.Gates.(featuregate.MutableFeatureGate).Set(string(k) + "=" + val)
+		}
+	})
+
+	It("should set IPAddressType to IPv4IPv6 when dual stack is supported and cluster is dual stack", func() {
+		// Use CreateClusterContextV1Alpha6 so the conversion client returns v1alpha6
+		clusterCtx, ctrlCtx := util.CreateClusterContextV1Alpha6(clusterCtx.Cluster, clusterCtx.VSphereCluster)
+		Expect(nsxvpcv1.AddToScheme(ctrlCtx.Scheme)).To(Succeed())
+		
+		vp = &nsxtVPCNetworkProvider{client: ctrlCtx.Client}
+
+		// Use the mock object to bypass some ncp/status checks
+		mocknp := &MockNSXTVpcNetworkProvider{vp}
+		err := mocknp.ProvisionClusterNetwork(ctx, clusterCtx)
+		Expect(err).ToNot(HaveOccurred())
+
+		createdSubnetSet := &nsxvpcv1.SubnetSet{}
+		err = ctrlCtx.Client.Get(ctx, apitypes.NamespacedName{
+			Name:      dummyCluster,
+			Namespace: dummyNs,
+		}, createdSubnetSet)
+		Expect(err).ToNot(HaveOccurred())
+
+		Expect(createdSubnetSet.Spec.IPAddressType).To(Equal(nsxvpcv1.IPAddressTypeIPv4IPv6))
 	})
 })
