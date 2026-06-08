@@ -17,17 +17,39 @@ limitations under the License.
 package vmware
 
 import (
+	"fmt"
+
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	vmoprv1alpha6 "github.com/vmware-tanzu/vm-operator/api/v1alpha6"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	bootstrapapi "k8s.io/cluster-bootstrap/token/api"
+	"k8s.io/component-base/featuregate"
+	clusterv1 "sigs.k8s.io/cluster-api/api/core/v1beta2"
 	capiutil "sigs.k8s.io/cluster-api/util"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	vmwarev1 "sigs.k8s.io/cluster-api-provider-vsphere/api/supervisor/v1beta2"
+	"sigs.k8s.io/cluster-api-provider-vsphere/feature"
 	vmwarehelpers "sigs.k8s.io/cluster-api-provider-vsphere/internal/test/helpers/vmware"
 	"sigs.k8s.io/cluster-api-provider-vsphere/pkg/context/fake"
+	conversionapi "sigs.k8s.io/cluster-api-provider-vsphere/pkg/conversion/api"
+	conversionclient "sigs.k8s.io/cluster-api-provider-vsphere/pkg/conversion/client"
+	"sigs.k8s.io/cluster-api-provider-vsphere/pkg/services"
+	"sigs.k8s.io/cluster-api-provider-vsphere/pkg/services/network"
 )
+
+type dummyDualStackNetworkProvider struct {
+	services.NetworkProvider
+}
+
+func (d *dummyDualStackNetworkProvider) SupportsIPv6DualStack() bool {
+	return true
+}
+
+func (d *dummyDualStackNetworkProvider) HasLoadBalancer() bool {
+	return true
+}
 
 var _ = Describe("ServiceDiscoveryReconciler reconcileNormal", serviceDiscoveryUnitTestsReconcileNormal)
 
@@ -43,7 +65,8 @@ func serviceDiscoveryUnitTestsReconcileNormal() {
 		vsphereCluster = fake.NewVSphereCluster(namespace)
 		controllerCtx = vmwarehelpers.NewUnitTestContextForController(ctx, namespace, &vsphereCluster, false, initObjects, nil)
 		reconciler = serviceDiscoveryReconciler{
-			Client: controllerCtx.ControllerManagerContext.Client,
+			Client:          controllerCtx.ControllerManagerContext.Client,
+			NetworkProvider: network.DummyNetworkProvider(),
 		}
 		err := reconciler.reconcileNormal(ctx, controllerCtx.GuestClusterContext)
 		Expect(err).NotTo(HaveOccurred())
@@ -73,11 +96,12 @@ func serviceDiscoveryUnitTestsReconcileNormal() {
 		})
 		It("Should get supervisor master endpoint IP", func() {
 			r := &serviceDiscoveryReconciler{
-				Client: controllerCtx.ControllerManagerContext.Client,
+				Client:          controllerCtx.ControllerManagerContext.Client,
+				NetworkProvider: network.DummyNetworkProvider(),
 			}
-			supervisorEndpointIP, err := r.getSupervisorAPIServerAddress(ctx)
+			supervisorEndpointIPs, err := r.getSupervisorAPIServerAddress(ctx, controllerCtx.Cluster)
 			Expect(err).ShouldNot(HaveOccurred())
-			Expect(supervisorEndpointIP).To(Equal(testSupervisorAPIServerVIP))
+			Expect(supervisorEndpointIPs).To(Equal([]string{testSupervisorAPIServerVIP}))
 		})
 	})
 	Context("When FIP is available", func() {
@@ -142,7 +166,7 @@ func serviceDiscoveryUnitTestsReconcileNormal() {
 				vmwarev1.VSphereClusterServiceDiscoveryNotReadyReason)
 		})
 	})
-	Context("When FIP is an invalid host", func() {
+	Context("When VIP is an invalid host", func() {
 		BeforeEach(func() {
 			initObjects = []client.Object{
 				newTestConfigMapWithHost("host^name"),
@@ -153,6 +177,68 @@ func serviceDiscoveryUnitTestsReconcileNormal() {
 			assertHeadlessSvcWithNoEndpoints(ctx, controllerCtx.GuestClient, supervisorHeadlessSvcNamespace, supervisorHeadlessSvcName)
 			assertServiceDiscoveryCondition(controllerCtx.VSphereCluster, metav1.ConditionFalse, "Failed to discover supervisor API server endpoint",
 				vmwarev1.VSphereClusterServiceDiscoveryNotReadyReason)
+		})
+	})
+		Context("When DualStack is supported and IPv4/IPv6 VIPs are available", func() {
+			BeforeEach(func() {
+				initObjects = []client.Object{
+					newTestSupervisorLBServiceWithDualStackStatus(),
+				}
+				err := feature.Gates.(featuregate.MutableFeatureGate).Set(fmt.Sprintf("%s=true", feature.IPv6DualStack))
+				Expect(err).ShouldNot(HaveOccurred())
+			})
+			AfterEach(func() {
+				err := feature.Gates.(featuregate.MutableFeatureGate).Set(fmt.Sprintf("%s=false", feature.IPv6DualStack))
+				Expect(err).ShouldNot(HaveOccurred())
+			})
+			It("Should get dual stack supervisor master endpoint IPs", func() {
+				controllerCtx.Cluster.Spec.ClusterNetwork = clusterv1.ClusterNetwork{
+					Pods: clusterv1.NetworkRanges{
+						CIDRBlocks: []string{"192.168.0.0/16", "fd00:100:96::/48"},
+					},
+				}
+				converter := conversionapi.DefaultConverterFor(vmoprv1alpha6.GroupVersion)
+				cc, err := conversionclient.NewWithConverter(controllerCtx.ControllerManagerContext.Client, converter)
+				Expect(err).ShouldNot(HaveOccurred())
+
+				r := &serviceDiscoveryReconciler{
+				Client:          cc,
+				NetworkProvider: &dummyDualStackNetworkProvider{},
+			}
+			supervisorEndpointIPs, err := r.getSupervisorAPIServerAddress(ctx, controllerCtx.Cluster)
+			Expect(err).ShouldNot(HaveOccurred())
+			Expect(supervisorEndpointIPs).To(Equal([]string{testSupervisorAPIServerVIP, testSupervisorAPIServerIPv6VIP}))
+		})
+	})
+		Context("When DualStack is supported and only IPv6 VIP is available (IPv6 Single Stack)", func() {
+			BeforeEach(func() {
+				initObjects = []client.Object{
+					newTestSupervisorLBServiceWithIPv6Status(),
+				}
+				err := feature.Gates.(featuregate.MutableFeatureGate).Set(fmt.Sprintf("%s=true", feature.IPv6DualStack))
+				Expect(err).ShouldNot(HaveOccurred())
+			})
+			AfterEach(func() {
+				err := feature.Gates.(featuregate.MutableFeatureGate).Set(fmt.Sprintf("%s=false", feature.IPv6DualStack))
+				Expect(err).ShouldNot(HaveOccurred())
+			})
+			It("Should get IPv6 supervisor master endpoint IP", func() {
+				controllerCtx.Cluster.Spec.ClusterNetwork = clusterv1.ClusterNetwork{
+					Pods: clusterv1.NetworkRanges{
+						CIDRBlocks: []string{"fd00:100:96::/48"},
+					},
+				}
+				converter := conversionapi.DefaultConverterFor(vmoprv1alpha6.GroupVersion)
+				cc, err := conversionclient.NewWithConverter(controllerCtx.ControllerManagerContext.Client, converter)
+				Expect(err).ShouldNot(HaveOccurred())
+
+				r := &serviceDiscoveryReconciler{
+				Client:          cc,
+				NetworkProvider: &dummyDualStackNetworkProvider{},
+			}
+			supervisorEndpointIPs, err := r.getSupervisorAPIServerAddress(ctx, controllerCtx.Cluster)
+			Expect(err).ShouldNot(HaveOccurred())
+			Expect(supervisorEndpointIPs).To(Equal([]string{testSupervisorAPIServerIPv6VIP}))
 		})
 	})
 	Context("When FIP config map has invalid kubeconfig data", func() {

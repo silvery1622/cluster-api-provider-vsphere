@@ -56,6 +56,9 @@ import (
 	vmwarev1 "sigs.k8s.io/cluster-api-provider-vsphere/api/supervisor/v1beta2"
 	capvcontext "sigs.k8s.io/cluster-api-provider-vsphere/pkg/context"
 	vmwarecontext "sigs.k8s.io/cluster-api-provider-vsphere/pkg/context/vmware"
+	inframanager "sigs.k8s.io/cluster-api-provider-vsphere/pkg/manager"
+	"sigs.k8s.io/cluster-api-provider-vsphere/pkg/services"
+	"sigs.k8s.io/cluster-api-provider-vsphere/pkg/util"
 )
 
 const (
@@ -74,10 +77,16 @@ const (
 
 // AddServiceDiscoveryControllerToManager adds the ServiceDiscovery controller to the provided manager.
 func AddServiceDiscoveryControllerToManager(ctx context.Context, controllerManagerCtx *capvcontext.ControllerManagerContext, mgr manager.Manager, clusterCache clustercache.ClusterCache, options controller.Options) error {
+	networkProvider, err := inframanager.GetNetworkProvider(ctx, controllerManagerCtx.Client, controllerManagerCtx.NetworkProvider)
+	if err != nil {
+		return errors.Wrap(err, "failed to create network provider")
+	}
+
 	r := &serviceDiscoveryReconciler{
-		Client:       controllerManagerCtx.Client,
-		Recorder:     mgr.GetEventRecorderFor("servicediscovery/vspherecluster-controller"),
-		clusterCache: clusterCache,
+		Client:          controllerManagerCtx.Client,
+		Recorder:        mgr.GetEventRecorderFor("servicediscovery/vspherecluster-controller"),
+		NetworkProvider: networkProvider,
+		clusterCache:    clusterCache,
 	}
 	predicateLog := ctrl.LoggerFrom(ctx).WithValues("controller", "servicediscovery/vspherecluster")
 
@@ -129,8 +138,9 @@ func clusterToSupervisorVSphereClusterFunc(ctrlclient client.Client) func(ctx co
 }
 
 type serviceDiscoveryReconciler struct {
-	Client   client.Client
-	Recorder record.EventRecorder
+	Client          client.Client
+	Recorder        record.EventRecorder
+	NetworkProvider services.NetworkProvider
 
 	clusterCache clustercache.ClusterCache
 }
@@ -269,7 +279,7 @@ func (r *serviceDiscoveryReconciler) reconcileSupervisorHeadlessService(ctx cont
 		}
 	}
 
-	supervisorHost, err := r.getSupervisorAPIServerAddress(ctx)
+	supervisorHosts, err := r.getSupervisorAPIServerAddress(ctx, guestClusterCtx.Cluster)
 	if err != nil {
 		// Note: We have watches on the LB Svc (VIP) & the cluster-info configmap (FIP).
 		// There is no need to return an error to keep re-trying.
@@ -284,10 +294,10 @@ func (r *serviceDiscoveryReconciler) reconcileSupervisorHeadlessService(ctx cont
 		return nil
 	}
 
-	log.V(5).Info("Discovered supervisor API server endpoint", "host", supervisorHost, "port", supervisorPort)
+	log.V(5).Info("Discovered supervisor API server endpoint", "hosts", supervisorHosts, "port", supervisorPort)
 	// CreateOrPatch the newEndpoints with the discovered supervisor api server address
 	newEndpoints, err := newSupervisorHeadlessServiceEndpoints(
-		supervisorHost,
+		supervisorHosts,
 		supervisorPort,
 	)
 	if err != nil {
@@ -351,21 +361,84 @@ func (r *serviceDiscoveryReconciler) reconcileSupervisorHeadlessService(ctx cont
 	return nil
 }
 
-func (r *serviceDiscoveryReconciler) getSupervisorAPIServerAddress(ctx context.Context) (string, error) {
-	// Discover the supervisor api server address
-	// 1. Check if a k8s service "kube-system/kube-apiserver-lb-svc" is available, if so, fetch the loadbalancer IP.
-	// 2. If not, get the Supervisor Cluster Management Network Floating IP (FIP) from the cluster-info configmap. This is
-	// to support non-NSX-T development use cases only. If we are unable to find the cluster-info configmap for some reason,
-	// we log the error.
-	supervisorHost, vipErr := getSupervisorAPIServerVIP(ctx, r.Client)
-	if vipErr != nil {
-		var fipErr error
-		supervisorHost, fipErr = getSupervisorAPIServerFIP(ctx, r.Client)
-		if fipErr != nil {
-			return "", errors.Wrapf(kerrors.NewAggregate([]error{vipErr, fipErr}), "Failed to discover supervisor API server endpoint")
+func (r *serviceDiscoveryReconciler) getSupervisorAPIServerAddress(ctx context.Context, cluster *clusterv1.Cluster) ([]string, error) {
+	ipFamily, err := util.DetermineClusterIPFamily(cluster)
+	if err != nil {
+		return nil, err
+	}
+	dualStackSupported := false
+	if r.NetworkProvider.SupportsIPv6DualStack() {
+		supported, err := util.IsDualStackSupported(r.Client)
+		if err != nil {
+			return nil, err
+		}
+		dualStackSupported = supported
+	}
+
+	// 1. Ensure the v4 single cluster logic doesn't change (or if dual-stack is not supported)
+	if !dualStackSupported || ipFamily == util.IPv4SingleStack {
+		supervisorHost, vipErr := getSupervisorAPIServerVIP(ctx, r.Client)
+		if vipErr != nil {
+			var fipErr error
+			supervisorHost, fipErr = getSupervisorAPIServerFIP(ctx, r.Client)
+			if fipErr != nil {
+				return nil, errors.Wrapf(kerrors.NewAggregate([]error{vipErr, fipErr}), "Failed to discover supervisor API server endpoint")
+			}
+		}
+		return []string{supervisorHost}, nil
+	}
+
+	// 2. For IPv6 single stack or dual-stack (when using NSX-VPC), only check VIP.
+	//    No FIP fallback since NSX-VPC does not support non-load-balanced scenarios.
+	vips, err := getSupervisorAPIServerVIPs(ctx, r.Client)
+	if err != nil {
+		return nil, errors.Wrap(err, "Failed to discover supervisor API server VIPs")
+	}
+
+	var ipv4, ipv6 string
+	for _, ip := range vips {
+		if net.ParseIP(ip).To4() != nil {
+			ipv4 = ip
+		} else if net.ParseIP(ip) != nil {
+			ipv6 = ip
 		}
 	}
-	return supervisorHost, nil
+
+	switch ipFamily {
+	case util.IPv6SingleStack:
+		if ipv6 == "" {
+			return nil, errors.Errorf("no IPv6 VIP found for IPv6 single stack cluster")
+		}
+		return []string{ipv6}, nil
+
+	case util.DualStackIPv4Primary:
+		var result []string
+		if ipv4 != "" {
+			result = append(result, ipv4)
+		}
+		if ipv6 != "" {
+			result = append(result, ipv6)
+		}
+		if len(result) == 0 {
+			return nil, errors.Errorf("no VIP found for dual stack cluster")
+		}
+		return result, nil
+
+	case util.DualStackIPv6Primary:
+		var result []string
+		if ipv6 != "" {
+			result = append(result, ipv6)
+		}
+		if ipv4 != "" {
+			result = append(result, ipv4)
+		}
+		if len(result) == 0 {
+			return nil, errors.Errorf("no VIP found for dual stack cluster")
+		}
+		return result, nil
+	}
+
+	return nil, errors.Errorf("unknown topology")
 }
 
 // newSupervisorHeadlessService returns a new Supervisor headless service.
@@ -389,11 +462,16 @@ func newSupervisorHeadlessService(port, targetPort int) *corev1.Service {
 }
 
 // newSupervisorHeadlessServiceEndpoints returns Kubernetes Endpoints for the supervisor apiserver address.
-func newSupervisorHeadlessServiceEndpoints(targetHost string, targetPort int) (*corev1.Endpoints, error) {
-	ip := net.ParseIP(targetHost)
-	if ip == nil {
-		return nil, errors.Errorf("invalid supervisor API server endpoint %q: must be an IP address", targetHost)
+func newSupervisorHeadlessServiceEndpoints(targetHosts []string, targetPort int) (*corev1.Endpoints, error) {
+	var addresses []corev1.EndpointAddress
+	for _, targetHost := range targetHosts {
+		ip := net.ParseIP(targetHost)
+		if ip == nil {
+			return nil, errors.Errorf("invalid supervisor API server endpoint %q: must be an IP address", targetHost)
+		}
+		addresses = append(addresses, corev1.EndpointAddress{IP: ip.String()})
 	}
+
 	return &corev1.Endpoints{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      vmwarev1.SupervisorHeadlessSvcName,
@@ -401,9 +479,7 @@ func newSupervisorHeadlessServiceEndpoints(targetHost string, targetPort int) (*
 		},
 		Subsets: []corev1.EndpointSubset{
 			{
-				Addresses: []corev1.EndpointAddress{
-					{IP: ip.String()},
-				},
+				Addresses: addresses,
 				Ports: []corev1.EndpointPort{
 					{
 						Port: int32(targetPort),
@@ -429,6 +505,28 @@ func getSupervisorAPIServerVIP(ctx context.Context, client client.Client) (strin
 		return ingress.Hostname, nil
 	}
 	return "", errors.Errorf("no VIP found in the supervisor loadbalancer Service %s", svcKey)
+}
+
+// getSupervisorAPIServerVIPs finds all load balancer IPs of the Supervisor APIServer.
+func getSupervisorAPIServerVIPs(ctx context.Context, client client.Client) ([]string, error) {
+	svc := &corev1.Service{}
+	svcKey := types.NamespacedName{Name: vmwarev1.SupervisorLoadBalancerSvcName, Namespace: vmwarev1.SupervisorLoadBalancerSvcNamespace}
+	if err := client.Get(ctx, svcKey, svc); err != nil {
+		return nil, errors.Wrapf(err, "unable to get supervisor loadbalancer Service %s", svcKey)
+	}
+
+	var vips []string
+	for _, ingress := range svc.Status.LoadBalancer.Ingress {
+		if ipAddr := ingress.IP; ipAddr != "" {
+			vips = append(vips, ipAddr)
+		} else if ingress.Hostname != "" {
+			vips = append(vips, ingress.Hostname)
+		}
+	}
+	if len(vips) > 0 {
+		return vips, nil
+	}
+	return nil, errors.Errorf("no VIP found in the supervisor loadbalancer Service %s", svcKey)
 }
 
 // getSupervisorAPIServerFIP finds the floating ip of the Supervisor APIServer.

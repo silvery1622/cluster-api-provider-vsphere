@@ -25,19 +25,20 @@ import (
 
 func TestDetermineClusterIPFamily(t *testing.T) {
 	tests := []struct {
-		name     string
-		cluster  *clusterv1.Cluster
-		expected ClusterIPFamily
+		name      string
+		cluster   *clusterv1.Cluster
+		expected  ClusterIPFamily
+		expectErr bool
 	}{
 		{
-			name:     "nil cluster",
-			cluster:  nil,
-			expected: IPv4SingleStack,
+			name:      "nil cluster",
+			cluster:   nil,
+			expectErr: true,
 		},
 		{
-			name:     "empty cluster network",
-			cluster:  &clusterv1.Cluster{},
-			expected: IPv4SingleStack,
+			name:      "empty cluster network",
+			cluster:   &clusterv1.Cluster{},
+			expectErr: true,
 		},
 		{
 			name: "IPv4 single stack (Pods)",
@@ -122,8 +123,13 @@ func TestDetermineClusterIPFamily(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			g := NewWithT(t)
-			actual := DetermineClusterIPFamily(tt.cluster)
-			g.Expect(actual).To(Equal(tt.expected))
+			actual, err := DetermineClusterIPFamily(tt.cluster)
+			if tt.expectErr {
+				g.Expect(err).To(HaveOccurred())
+			} else {
+				g.Expect(err).ToNot(HaveOccurred())
+				g.Expect(actual).To(Equal(tt.expected))
+			}
 		})
 	}
 }

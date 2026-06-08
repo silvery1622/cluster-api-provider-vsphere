@@ -37,6 +37,7 @@ import (
 const (
 	testSupervisorAPIServerVIP         = "10.0.0.100"
 	testSupervisorAPIServerVIP2        = "10.0.0.200"
+	testSupervisorAPIServerIPv6VIP     = "fd00::100"
 	testSupervisorAPIServerVIPHostName = "vip.example.com"
 	testSupervisorAPIServerFIP         = "192.168.1.100"
 	testSupervisorAPIServerFIPHostName = "fip.example.com"
@@ -149,6 +150,37 @@ func newTestSupervisorLBServiceWithHostnameStatus() *corev1.Service {
 			Ingress: []corev1.LoadBalancerIngress{
 				{
 					Hostname: testSupervisorAPIServerVIPHostName,
+				},
+			},
+		},
+	}
+	return svc
+}
+
+func newTestSupervisorLBServiceWithDualStackStatus() *corev1.Service {
+	svc := newTestSupervisorLBService()
+	svc.Status = corev1.ServiceStatus{
+		LoadBalancer: corev1.LoadBalancerStatus{
+			Ingress: []corev1.LoadBalancerIngress{
+				{
+					IP: testSupervisorAPIServerVIP,
+				},
+				{
+					IP: testSupervisorAPIServerIPv6VIP,
+				},
+			},
+		},
+	}
+	return svc
+}
+
+func newTestSupervisorLBServiceWithIPv6Status() *corev1.Service {
+	svc := newTestSupervisorLBService()
+	svc.Status = corev1.ServiceStatus{
+		LoadBalancer: corev1.LoadBalancerStatus{
+			Ingress: []corev1.LoadBalancerIngress{
+				{
+					IP: testSupervisorAPIServerIPv6VIP,
 				},
 			},
 		},

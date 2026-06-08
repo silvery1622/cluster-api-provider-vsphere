@@ -17,6 +17,7 @@ limitations under the License.
 package util
 
 import (
+	"fmt"
 	"strings"
 
 	clusterv1 "sigs.k8s.io/cluster-api/api/core/v1beta2"
@@ -40,16 +41,16 @@ const (
 )
 
 // DetermineClusterIPFamily inspects the cluster network to determine the intended IP topology.
-func DetermineClusterIPFamily(cluster *clusterv1.Cluster) ClusterIPFamily {
+func DetermineClusterIPFamily(cluster *clusterv1.Cluster) (ClusterIPFamily, error) {
 	if cluster == nil {
-		return IPv4SingleStack // safe default when cluster config unavailable
+		return "", fmt.Errorf("cluster is nil")
 	}
 	cidrBlocks := cluster.Spec.ClusterNetwork.Pods.CIDRBlocks
 	if len(cidrBlocks) == 0 {
 		cidrBlocks = cluster.Spec.ClusterNetwork.Services.CIDRBlocks
 	}
 	if len(cidrBlocks) == 0 {
-		return IPv4SingleStack
+		return "", fmt.Errorf("cluster %s/%s has no Pod or Service CIDR blocks", cluster.Namespace, cluster.Name)
 	}
 
 	var hasIPv4, hasIPv6 bool
@@ -68,12 +69,12 @@ func DetermineClusterIPFamily(cluster *clusterv1.Cluster) ClusterIPFamily {
 
 	if hasIPv4 && hasIPv6 {
 		if firstIsIPv6 {
-			return DualStackIPv6Primary
+			return DualStackIPv6Primary, nil
 		}
-		return DualStackIPv4Primary
+		return DualStackIPv4Primary, nil
 	}
 	if hasIPv6 {
-		return IPv6SingleStack
+		return IPv6SingleStack, nil
 	}
-	return IPv4SingleStack
+	return IPv4SingleStack, nil
 }

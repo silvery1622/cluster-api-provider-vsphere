@@ -87,7 +87,10 @@ func (s *CPService) ReconcileControlPlaneEndpointService(ctx context.Context, cl
 	}
 
 	// 1. Determine the cluster's intended IP ipFamily
-	ipFamily := util.DetermineClusterIPFamily(clusterCtx.Cluster)
+	ipFamily, err := util.DetermineClusterIPFamily(clusterCtx.Cluster)
+	if err != nil {
+		return nil, err
+	}
 
 	// 2. Capability Check
 	ipv6DualStackSupported := false
