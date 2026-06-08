@@ -28,6 +28,9 @@ import (
 func convert_v1alpha6_VirtualMachineService_To_hub_VirtualMachineService(_ context.Context, src *vmoprv1alpha6.VirtualMachineService, dst *vmoprvhub.VirtualMachineService) error {
 	dst.ObjectMeta = src.ObjectMeta
 
+	dst.Spec.IPFamilies = src.Spec.IPFamilies
+	dst.Spec.IPFamilyPolicy = src.Spec.IPFamilyPolicy
+
 	if src.Spec.Ports != nil {
 		dst.Spec.Ports = []vmoprvhub.VirtualMachineServicePort{}
 		for _, port := range src.Spec.Ports {
@@ -57,6 +60,9 @@ func convert_v1alpha6_VirtualMachineService_To_hub_VirtualMachineService(_ conte
 
 func convert_hub_VirtualMachineService_To_v1alpha6_VirtualMachineService(_ context.Context, src *vmoprvhub.VirtualMachineService, dst *vmoprv1alpha6.VirtualMachineService) error {
 	dst.ObjectMeta = src.ObjectMeta
+
+	dst.Spec.IPFamilies = src.Spec.IPFamilies
+	dst.Spec.IPFamilyPolicy = src.Spec.IPFamilyPolicy
 
 	if src.Spec.Ports != nil {
 		dst.Spec.Ports = []vmoprv1alpha6.VirtualMachineServicePort{}

@@ -73,6 +73,9 @@ func TestFuzzyConversion(t *testing.T) {
 		Converter: converter,
 		Hub:       &vmoprvhub.VirtualMachineService{},
 		Spoke:     &vmoprv1alpha2.VirtualMachineService{},
+		FuzzerFuncs: []fuzzer.FuzzerFuncs{
+			virtualMachineServiceFuncs,
+		},
 	}))
 	t.Run("for VirtualMachineSetResourcePolicy", conversiontest.RoundTripTest(conversiontest.RoundTripTestInput{
 		Converter: converter,
@@ -97,24 +100,10 @@ func virtualMachineFuncs(_ runtimeserializer.CodecFactory) []interface{} {
 
 func hubVirtualMachineVolume(in *vmoprvhub.VirtualMachineVolume, c randfill.Continue) {
 	c.FillNoCustom(in)
-	// Fields existing in hub but not in v1alpha2.VirtualMachineVolume
-	in.ApplicationType = ""
-	in.ControllerBusNumber = nil
-	in.ControllerType = ""
-	in.DiskMode = ""
-	in.Removable = nil
-	in.SharingMode = ""
-	in.UnitNumber = nil
 }
 
 func hubVirtualMachineNetworkInterfaceSpec(in *vmoprvhub.VirtualMachineNetworkInterfaceSpec, c randfill.Continue) {
 	c.FillNoCustom(in)
-	// Fields existing in hub but not in v1alpha2.VirtualMachineNetworkInterfaceSpec
-	in.AdvancedProperties = nil
-	in.IPAMModes = nil
-	in.Type = ""
-	in.VMXNet3 = nil
-	in.VNUMANodeID = nil
 }
 
 func virtualMachineGroupFuncs(_ runtimeserializer.CodecFactory) []interface{} {
@@ -125,20 +114,24 @@ func virtualMachineGroupFuncs(_ runtimeserializer.CodecFactory) []interface{} {
 
 func hubVirtualMachineGroupPlacementDatastoreStatus(in *vmoprvhub.VirtualMachineGroupPlacementDatastoreStatus, c randfill.Continue) {
 	c.FillNoCustom(in)
-	// Fields existing in hub but not in v1alpha2.VirtualMachineGroupPlacementDatastoreStatus
+	// TopLevelDirectoryCreateSupported existing in hub but not in v1alpha2.VirtualMachineGroupPlacementDatastoreStatus
 	in.TopLevelDirectoryCreateSupported = false
 }
 
 func hubVirtualMachineSpec(in *vmoprvhub.VirtualMachineSpec, c randfill.Continue) {
 	c.FillNoCustom(in)
-	// Policies exists in hub and v1alpha5 but not in v1alpha2; zero it so the
-	// hub-spoke-hub round-trip test does not report spurious data loss.
-	in.Policies = nil
 }
 
 func hubVirtualMachineStatus(in *vmoprvhub.VirtualMachineStatus, c randfill.Continue) {
 	c.FillNoCustom(in)
-	// Policies exists in hub and v1alpha5 but not in v1alpha2; zero it so the
-	// hub-spoke-hub round-trip test does not report spurious data loss.
-	in.Policies = nil
+}
+
+func virtualMachineServiceFuncs(_ runtimeserializer.CodecFactory) []interface{} {
+	return []interface{}{
+		hubVirtualMachineServiceSpec,
+	}
+}
+
+func hubVirtualMachineServiceSpec(in *vmoprvhub.VirtualMachineServiceSpec, c randfill.Continue) {
+	c.FillNoCustom(in)
 }

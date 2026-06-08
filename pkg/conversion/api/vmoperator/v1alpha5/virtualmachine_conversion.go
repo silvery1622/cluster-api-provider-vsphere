@@ -24,6 +24,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/utils/ptr"
+	utilconversion "sigs.k8s.io/cluster-api/util/conversion"
 
 	"sigs.k8s.io/cluster-api-provider-vsphere/pkg/conversion"
 	vmoprvhub "sigs.k8s.io/cluster-api-provider-vsphere/pkg/conversion/api/vmoperator/hub"
@@ -32,10 +33,23 @@ import (
 func convert_v1alpha5_VirtualMachine_To_hub_VirtualMachine(_ context.Context, src *vmoprv1alpha5.VirtualMachine, dst *vmoprvhub.VirtualMachine) error {
 	dst.ObjectMeta = src.ObjectMeta
 
+	if ok, err := utilconversion.UnmarshalData(src, dst); err != nil {
+		return err
+	} else if ok {
+		delete(dst.Annotations, "cluster.x-k8s.io/conversion-data")
+		if len(dst.Annotations) == 0 {
+			dst.Annotations = nil
+		}
+	}
+
 	if src.Spec.Affinity != nil {
-		dst.Spec.Affinity = &vmoprvhub.AffinitySpec{}
+		if dst.Spec.Affinity == nil {
+			dst.Spec.Affinity = &vmoprvhub.AffinitySpec{}
+		}
 		if src.Spec.Affinity.VMAffinity != nil {
-			dst.Spec.Affinity.VMAffinity = &vmoprvhub.VMAffinitySpec{}
+			if dst.Spec.Affinity.VMAffinity == nil {
+				dst.Spec.Affinity.VMAffinity = &vmoprvhub.VMAffinitySpec{}
+			}
 			if src.Spec.Affinity.VMAffinity.RequiredDuringSchedulingPreferredDuringExecution != nil {
 				terms := []vmoprvhub.VMAffinityTerm{}
 				for _, term := range src.Spec.Affinity.VMAffinity.RequiredDuringSchedulingPreferredDuringExecution {
@@ -48,10 +62,16 @@ func convert_v1alpha5_VirtualMachine_To_hub_VirtualMachine(_ context.Context, sr
 					terms = append(terms, t)
 				}
 				dst.Spec.Affinity.VMAffinity.RequiredDuringSchedulingPreferredDuringExecution = terms
+			} else {
+				dst.Spec.Affinity.VMAffinity.RequiredDuringSchedulingPreferredDuringExecution = nil
 			}
+		} else {
+			dst.Spec.Affinity.VMAffinity = nil
 		}
 		if src.Spec.Affinity.VMAntiAffinity != nil {
-			dst.Spec.Affinity.VMAntiAffinity = &vmoprvhub.VMAntiAffinitySpec{}
+			if dst.Spec.Affinity.VMAntiAffinity == nil {
+				dst.Spec.Affinity.VMAntiAffinity = &vmoprvhub.VMAntiAffinitySpec{}
+			}
 			if src.Spec.Affinity.VMAntiAffinity.PreferredDuringSchedulingPreferredDuringExecution != nil {
 				terms := []vmoprvhub.VMAffinityTerm{}
 				for _, term := range src.Spec.Affinity.VMAntiAffinity.PreferredDuringSchedulingPreferredDuringExecution {
@@ -64,30 +84,56 @@ func convert_v1alpha5_VirtualMachine_To_hub_VirtualMachine(_ context.Context, sr
 					terms = append(terms, t)
 				}
 				dst.Spec.Affinity.VMAntiAffinity.PreferredDuringSchedulingPreferredDuringExecution = terms
+			} else {
+				dst.Spec.Affinity.VMAntiAffinity.PreferredDuringSchedulingPreferredDuringExecution = nil
 			}
+		} else {
+			dst.Spec.Affinity.VMAntiAffinity = nil
 		}
+	} else {
+		dst.Spec.Affinity = nil
 	}
 	if src.Spec.Bootstrap != nil {
-		dst.Spec.Bootstrap = &vmoprvhub.VirtualMachineBootstrapSpec{}
+		if dst.Spec.Bootstrap == nil {
+			dst.Spec.Bootstrap = &vmoprvhub.VirtualMachineBootstrapSpec{}
+		}
 		if src.Spec.Bootstrap.CloudInit != nil {
-			dst.Spec.Bootstrap.CloudInit = &vmoprvhub.VirtualMachineBootstrapCloudInitSpec{}
+			if dst.Spec.Bootstrap.CloudInit == nil {
+				dst.Spec.Bootstrap.CloudInit = &vmoprvhub.VirtualMachineBootstrapCloudInitSpec{}
+			}
 			if src.Spec.Bootstrap.CloudInit.RawCloudConfig != nil {
 				dst.Spec.Bootstrap.CloudInit.RawCloudConfig = &vmoprvhub.SecretKeySelector{
 					Name: src.Spec.Bootstrap.CloudInit.RawCloudConfig.Name,
 					Key:  src.Spec.Bootstrap.CloudInit.RawCloudConfig.Key,
 				}
+			} else {
+				dst.Spec.Bootstrap.CloudInit.RawCloudConfig = nil
 			}
+		} else {
+			dst.Spec.Bootstrap.CloudInit = nil
 		}
+	} else {
+		dst.Spec.Bootstrap = nil
 	}
 	dst.Spec.ClassName = src.Spec.ClassName
 	dst.Spec.GroupName = src.Spec.GroupName
 	dst.Spec.ImageName = src.Spec.ImageName
 	if src.Spec.Network != nil {
-		dst.Spec.Network = &vmoprvhub.VirtualMachineNetworkSpec{}
+		if dst.Spec.Network == nil {
+			dst.Spec.Network = &vmoprvhub.VirtualMachineNetworkSpec{}
+		}
 		if src.Spec.Network.Interfaces != nil {
+			restoredInterfaces := map[string]vmoprvhub.VirtualMachineNetworkInterfaceSpec{}
+			for _, iface := range dst.Spec.Network.Interfaces {
+				restoredInterfaces[iface.Name] = iface
+			}
+
 			dst.Spec.Network.Interfaces = []vmoprvhub.VirtualMachineNetworkInterfaceSpec{}
 			for _, iface := range src.Spec.Network.Interfaces {
-				d := vmoprvhub.VirtualMachineNetworkInterfaceSpec{}
+				d, ok := restoredInterfaces[iface.Name]
+				if !ok {
+					d = vmoprvhub.VirtualMachineNetworkInterfaceSpec{}
+				}
 				d.Addresses = iface.Addresses
 				// AdvancedProperties existing in hub but not in v1alpha5.VirtualMachineNetworkInterfaceSpec
 				d.DHCP4 = iface.DHCP4
@@ -128,6 +174,8 @@ func convert_v1alpha5_VirtualMachine_To_hub_VirtualMachine(_ context.Context, sr
 				dst.Spec.Network.Interfaces = append(dst.Spec.Network.Interfaces, d)
 			}
 		}
+	} else {
+		dst.Spec.Network = nil
 	}
 	dst.Spec.MinHardwareVersion = src.Spec.MinHardwareVersion
 	if src.Spec.Policies != nil {
@@ -143,53 +191,81 @@ func convert_v1alpha5_VirtualMachine_To_hub_VirtualMachine(_ context.Context, sr
 	dst.Spec.PowerOffMode = vmoprvhub.VirtualMachinePowerOpMode(src.Spec.PowerOffMode)
 	dst.Spec.PowerState = vmoprvhub.VirtualMachinePowerState(src.Spec.PowerState)
 	if src.Spec.ReadinessProbe != nil {
-		dst.Spec.ReadinessProbe = &vmoprvhub.VirtualMachineReadinessProbeSpec{}
+		if dst.Spec.ReadinessProbe == nil {
+			dst.Spec.ReadinessProbe = &vmoprvhub.VirtualMachineReadinessProbeSpec{}
+		}
 		if src.Spec.ReadinessProbe.TCPSocket != nil {
 			dst.Spec.ReadinessProbe.TCPSocket = &vmoprvhub.TCPSocketAction{
 				Port: src.Spec.ReadinessProbe.TCPSocket.Port,
 				Host: src.Spec.ReadinessProbe.TCPSocket.Host,
 			}
+		} else {
+			dst.Spec.ReadinessProbe.TCPSocket = nil
 		}
+	} else {
+		dst.Spec.ReadinessProbe = nil
 	}
 	if src.Spec.Reserved != nil {
-		dst.Spec.Reserved = &vmoprvhub.VirtualMachineReservedSpec{
-			ResourcePolicyName: src.Spec.Reserved.ResourcePolicyName,
+		if dst.Spec.Reserved == nil {
+			dst.Spec.Reserved = &vmoprvhub.VirtualMachineReservedSpec{}
 		}
+		dst.Spec.Reserved.ResourcePolicyName = src.Spec.Reserved.ResourcePolicyName
+	} else {
+		dst.Spec.Reserved = nil
 	}
 	dst.Spec.StorageClass = src.Spec.StorageClass
 	if src.Spec.Volumes != nil {
+		restoredVolumes := map[string]vmoprvhub.VirtualMachineVolume{}
+		for _, volume := range dst.Spec.Volumes {
+			restoredVolumes[volume.Name] = volume
+		}
+
 		dst.Spec.Volumes = []vmoprvhub.VirtualMachineVolume{}
 		for _, volume := range src.Spec.Volumes {
-			v := vmoprvhub.VirtualMachineVolume{}
+			v, ok := restoredVolumes[volume.Name]
+			if !ok {
+				v = vmoprvhub.VirtualMachineVolume{}
+			}
 			v.ApplicationType = vmoprvhub.VolumeApplicationType(volume.ApplicationType)
 			if volume.ControllerBusNumber != nil {
 				v.ControllerBusNumber = ptr.To(*volume.ControllerBusNumber)
+			} else {
+				v.ControllerBusNumber = nil
 			}
 			v.ControllerType = vmoprvhub.VirtualControllerType(volume.ControllerType)
 			v.DiskMode = vmoprvhub.VolumeDiskMode(volume.DiskMode)
 			v.Name = volume.Name
 			if volume.PersistentVolumeClaim != nil {
-				v.PersistentVolumeClaim = &vmoprvhub.PersistentVolumeClaimVolumeSource{
-					PersistentVolumeClaimVolumeSource: corev1.PersistentVolumeClaimVolumeSource{
-						ClaimName: volume.PersistentVolumeClaim.ClaimName,
-						ReadOnly:  volume.PersistentVolumeClaim.ReadOnly,
-					},
+				if v.PersistentVolumeClaim == nil {
+					v.PersistentVolumeClaim = &vmoprvhub.PersistentVolumeClaimVolumeSource{}
+				}
+				v.PersistentVolumeClaim.PersistentVolumeClaimVolumeSource = corev1.PersistentVolumeClaimVolumeSource{
+					ClaimName: volume.PersistentVolumeClaim.ClaimName,
+					ReadOnly:  volume.PersistentVolumeClaim.ReadOnly,
 				}
 				if volume.PersistentVolumeClaim.InstanceVolumeClaim != nil {
-					v.PersistentVolumeClaim.InstanceVolumeClaim = &vmoprvhub.InstanceVolumeClaimVolumeSource{
-						StorageClass: volume.PersistentVolumeClaim.InstanceVolumeClaim.StorageClass,
-						Size:         volume.PersistentVolumeClaim.InstanceVolumeClaim.Size,
+					if v.PersistentVolumeClaim.InstanceVolumeClaim == nil {
+						v.PersistentVolumeClaim.InstanceVolumeClaim = &vmoprvhub.InstanceVolumeClaimVolumeSource{}
 					}
+					v.PersistentVolumeClaim.InstanceVolumeClaim.StorageClass = volume.PersistentVolumeClaim.InstanceVolumeClaim.StorageClass
+					v.PersistentVolumeClaim.InstanceVolumeClaim.Size = volume.PersistentVolumeClaim.InstanceVolumeClaim.Size
+				} else {
+					v.PersistentVolumeClaim.InstanceVolumeClaim = nil
 				}
-
+			} else {
+				v.PersistentVolumeClaim = nil
 			}
 			v.Removable = volume.Removable
 			v.SharingMode = vmoprvhub.VolumeSharingMode(volume.SharingMode)
 			if volume.UnitNumber != nil {
 				v.UnitNumber = ptr.To(*volume.UnitNumber)
+			} else {
+				v.UnitNumber = nil
 			}
 			dst.Spec.Volumes = append(dst.Spec.Volumes, v)
 		}
+	} else {
+		dst.Spec.Volumes = nil
 	}
 
 	dst.Status.BiosUUID = src.Status.BiosUUID
@@ -200,26 +276,40 @@ func convert_v1alpha5_VirtualMachine_To_hub_VirtualMachine(_ context.Context, sr
 		}
 	}
 	if src.Status.Network != nil {
-		dst.Status.Network = &vmoprvhub.VirtualMachineNetworkStatus{}
+		if dst.Status.Network == nil {
+			dst.Status.Network = &vmoprvhub.VirtualMachineNetworkStatus{}
+		}
 		dst.Status.Network.HostName = src.Status.Network.HostName
 		if src.Status.Network.Interfaces != nil {
+			restoredInterfaces := map[int32]vmoprvhub.VirtualMachineNetworkInterfaceStatus{}
+			for _, iface := range dst.Status.Network.Interfaces {
+				restoredInterfaces[iface.DeviceKey] = iface
+			}
+
 			dst.Status.Network.Interfaces = []vmoprvhub.VirtualMachineNetworkInterfaceStatus{}
 			for _, iface := range src.Status.Network.Interfaces {
-				d := vmoprvhub.VirtualMachineNetworkInterfaceStatus{}
+				d, ok := restoredInterfaces[iface.DeviceKey]
+				if !ok {
+					d = vmoprvhub.VirtualMachineNetworkInterfaceStatus{}
+				}
 				d.DeviceKey = iface.DeviceKey
 				if iface.DNS != nil {
-					d.DNS = &vmoprvhub.VirtualMachineNetworkDNSStatus{
-						DHCP:          iface.DNS.DHCP,
-						HostName:      iface.DNS.HostName,
-						DomainName:    iface.DNS.DomainName,
-						Nameservers:   iface.DNS.Nameservers,
-						SearchDomains: iface.DNS.SearchDomains,
+					if d.DNS == nil {
+						d.DNS = &vmoprvhub.VirtualMachineNetworkDNSStatus{}
 					}
+					d.DNS.DHCP = iface.DNS.DHCP
+					d.DNS.HostName = iface.DNS.HostName
+					d.DNS.DomainName = iface.DNS.DomainName
+					d.DNS.Nameservers = iface.DNS.Nameservers
+					d.DNS.SearchDomains = iface.DNS.SearchDomains
+				} else {
+					d.DNS = nil
 				}
 				if iface.IP != nil {
-					d.IP = &vmoprvhub.VirtualMachineNetworkInterfaceIPStatus{
-						MACAddr: iface.IP.MACAddr,
+					if d.IP == nil {
+						d.IP = &vmoprvhub.VirtualMachineNetworkInterfaceIPStatus{}
 					}
+					d.IP.MACAddr = iface.IP.MACAddr
 					if iface.IP.Addresses != nil {
 						d.IP.Addresses = []vmoprvhub.VirtualMachineNetworkInterfaceIPAddrStatus{}
 						for _, addr := range iface.IP.Addresses {
@@ -230,19 +320,21 @@ func convert_v1alpha5_VirtualMachine_To_hub_VirtualMachine(_ context.Context, sr
 								State:    addr.State,
 							})
 						}
+					} else {
+						d.IP.Addresses = nil
 					}
 					if iface.IP.AutoConfigurationEnabled != nil {
 						d.IP.AutoConfigurationEnabled = ptr.To(*iface.IP.AutoConfigurationEnabled)
+					} else {
+						d.IP.AutoConfigurationEnabled = nil
 					}
 					if iface.IP.DHCP != nil {
-						d.IP.DHCP = &vmoprvhub.VirtualMachineNetworkDHCPStatus{
-							IP4: vmoprvhub.VirtualMachineNetworkDHCPOptionsStatus{
-								Enabled: iface.IP.DHCP.IP4.Enabled,
-							},
-							IP6: vmoprvhub.VirtualMachineNetworkDHCPOptionsStatus{
-								Enabled: iface.IP.DHCP.IP6.Enabled,
-							},
+						if d.IP.DHCP == nil {
+							d.IP.DHCP = &vmoprvhub.VirtualMachineNetworkDHCPStatus{}
 						}
+						d.IP.DHCP.IP4.Enabled = iface.IP.DHCP.IP4.Enabled
+						d.IP.DHCP.IP6.Enabled = iface.IP.DHCP.IP6.Enabled
+
 						if iface.IP.DHCP.IP4.Config != nil {
 							d.IP.DHCP.IP4.Config = []vmoprvhub.KeyValuePair{}
 							for _, pair := range iface.IP.DHCP.IP4.Config {
@@ -251,6 +343,8 @@ func convert_v1alpha5_VirtualMachine_To_hub_VirtualMachine(_ context.Context, sr
 									Value: pair.Value,
 								})
 							}
+						} else {
+							d.IP.DHCP.IP4.Config = nil
 						}
 						if iface.IP.DHCP.IP6.Config != nil {
 							d.IP.DHCP.IP6.Config = []vmoprvhub.KeyValuePair{}
@@ -260,15 +354,25 @@ func convert_v1alpha5_VirtualMachine_To_hub_VirtualMachine(_ context.Context, sr
 									Value: pair.Value,
 								})
 							}
+						} else {
+							d.IP.DHCP.IP6.Config = nil
 						}
+					} else {
+						d.IP.DHCP = nil
 					}
+				} else {
+					d.IP = nil
 				}
 				d.Name = iface.Name
 				dst.Status.Network.Interfaces = append(dst.Status.Network.Interfaces, d)
 			}
+		} else {
+			dst.Status.Network.Interfaces = nil
 		}
 		dst.Status.Network.PrimaryIP4 = src.Status.Network.PrimaryIP4
 		dst.Status.Network.PrimaryIP6 = src.Status.Network.PrimaryIP6
+	} else {
+		dst.Status.Network = nil
 	}
 	dst.Status.NodeName = src.Status.NodeName
 	if src.Status.Policies != nil {
@@ -292,6 +396,10 @@ func convert_v1alpha5_VirtualMachine_To_hub_VirtualMachine(_ context.Context, sr
 
 func convert_hub_VirtualMachine_To_v1alpha5_VirtualMachine(_ context.Context, src *vmoprvhub.VirtualMachine, dst *vmoprv1alpha5.VirtualMachine) error {
 	dst.ObjectMeta = src.ObjectMeta
+
+	if err := utilconversion.MarshalData(src, dst); err != nil {
+		return err
+	}
 
 	if src.Spec.Affinity != nil {
 		dst.Spec.Affinity = &vmoprv1alpha5.AffinitySpec{}

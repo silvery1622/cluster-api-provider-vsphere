@@ -238,7 +238,7 @@ type VirtualMachineNetworkInterfaceSpec struct {
 	// IPAMModes requests which IP address families (IPv4 and/or IPv6) the network
 	// provider allocates for this interface. Allowed values are IPv4 and IPv6.
 	// Each family appears at most once; duplicate values are rejected by the API
-	// server; order does not change meaning—[IPv4, IPv6] and [IPv6, IPv4] are the
+	// server; order does not change meaning. [IPv4, IPv6] and [IPv6, IPv4] are the
 	// same dual-stack request.
 	//
 	// When unset, the provider's default applies for which families are allocated.

@@ -159,7 +159,7 @@ type VirtualMachineNetworkInterfaceVMXNet3Spec struct {
 	// UDPRSSEnabled extends RSS to UDP traffic. By default RSS only distributes
 	// TCP flows. Enabling this also distributes UDP flows, improving throughput
 	// for UDP-heavy workloads such as GTP-U tunnels, QUIC, or media streaming.
-	UDPRSSEnabled *bool `json:"udpRSSEnabled,omitempty" vmx:"ethernet%d.udpRSS"`
+	UDPRSSEnabled *UDPRSSMode `json:"udpRSSEnabled,omitempty" vmx:"ethernet%d.udpRSS"`
 
 	// +optional
 	// +kubebuilder:validation:MaxItems=16
@@ -194,3 +194,7 @@ type VirtualMachineNetworkInterfaceVMXNet3Spec struct {
 	// Must be length < 128 and valid 32-bit unsigned integer for RateBasedCoalescing.
 	CoalescingParams *string `json:"coalescingParams,omitempty" vmx:"ethernet%d.coalescingParams"`
 }
+
+// UDPRSSMode controls whether UDP Receive Side Scaling is enabled on a VMXNet3
+// interface.
+type UDPRSSMode bool

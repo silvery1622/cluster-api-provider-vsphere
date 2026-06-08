@@ -95,6 +95,22 @@ func (p *conversionMergePatch) Data(obj client.Object) ([]byte, error) {
 		if err := p.client.converter.Convert(p.conversionCtx, obj, toObj); err != nil {
 			return nil, errors.Wrapf(err, "failed to convert modified %s to target version while computing patch data", klog.KObj(obj))
 		}
+	} else {
+		toObj = obj.DeepCopyObject().(client.Object)
+	}
+
+	// Strip conversion-data annotation before computing patch data to avoid including it in the patch.
+	if fromObj.GetAnnotations() != nil {
+		delete(fromObj.GetAnnotations(), "cluster.x-k8s.io/conversion-data")
+		if len(fromObj.GetAnnotations()) == 0 {
+			fromObj.SetAnnotations(nil)
+		}
+	}
+	if toObj.GetAnnotations() != nil {
+		delete(toObj.GetAnnotations(), "cluster.x-k8s.io/conversion-data")
+		if len(toObj.GetAnnotations()) == 0 {
+			toObj.SetAnnotations(nil)
+		}
 	}
 
 	gvkFrom, err := p.client.GroupVersionKindFor(fromObj)

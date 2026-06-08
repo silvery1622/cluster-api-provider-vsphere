@@ -17,6 +17,7 @@ limitations under the License.
 package hub
 
 import (
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	conversionmeta "sigs.k8s.io/cluster-api-provider-vsphere/pkg/conversion/api/meta"
@@ -110,6 +111,25 @@ type VirtualMachineServiceSpec struct {
 	// Selector, that is used to match this VirtualMachineService with the set
 	// of VirtualMachines that should back this VirtualMachineService.
 	Selector map[string]string `json:"selector,omitempty"`
+
+	// IPFamilies is a list of IP families (e.g. IPv4, IPv6) assigned to this
+	// VirtualMachineService. This field is usually assigned automatically based
+	// on the cluster configuration and the IPFamilyPolicy field. If this field
+	// is specified, it must match the IPFamilyPolicy field.
+	//
+	// +optional
+	IPFamilies []corev1.IPFamily `json:"ipFamilies,omitempty"`
+
+	// IPFamilyPolicy represents the dual-stack-ness requested or required by
+	// this VirtualMachineService. If there is no value provided, then this
+	// field will be set to SingleStack. Services can be "SingleStack" (a single
+	// IP family), "PreferDualStack" (two IP families on dual-stack configured
+	// clusters or a single IP family on single-stack clusters), or
+	// "RequireDualStack" (two IP families on dual-stack configured clusters,
+	// otherwise fail).
+	//
+	// +optional
+	IPFamilyPolicy *corev1.IPFamilyPolicy `json:"ipFamilyPolicy,omitempty"`
 }
 
 // VirtualMachineServiceStatus defines the observed state of

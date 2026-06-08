@@ -20,6 +20,7 @@ import (
 	"context"
 
 	vmoprv1alpha5 "github.com/vmware-tanzu/vm-operator/api/v1alpha5"
+	utilconversion "sigs.k8s.io/cluster-api/util/conversion"
 
 	"sigs.k8s.io/cluster-api-provider-vsphere/pkg/conversion"
 	vmoprvhub "sigs.k8s.io/cluster-api-provider-vsphere/pkg/conversion/api/vmoperator/hub"
@@ -27,6 +28,15 @@ import (
 
 func convert_v1alpha5_VirtualMachineService_To_hub_VirtualMachineService(_ context.Context, src *vmoprv1alpha5.VirtualMachineService, dst *vmoprvhub.VirtualMachineService) error {
 	dst.ObjectMeta = src.ObjectMeta
+
+	if ok, err := utilconversion.UnmarshalData(src, dst); err != nil {
+		return err
+	} else if ok {
+		delete(dst.Annotations, "cluster.x-k8s.io/conversion-data")
+		if len(dst.Annotations) == 0 {
+			dst.Annotations = nil
+		}
+	}
 
 	if src.Spec.Ports != nil {
 		dst.Spec.Ports = []vmoprvhub.VirtualMachineServicePort{}
@@ -58,6 +68,12 @@ func convert_v1alpha5_VirtualMachineService_To_hub_VirtualMachineService(_ conte
 func convert_hub_VirtualMachineService_To_v1alpha5_VirtualMachineService(_ context.Context, src *vmoprvhub.VirtualMachineService, dst *vmoprv1alpha5.VirtualMachineService) error {
 	dst.ObjectMeta = src.ObjectMeta
 
+	if err := utilconversion.MarshalData(src, dst); err != nil {
+		return err
+	}
+
+	// IPFamilies existing in hub but not in v1alpha5.VirtualMachineServiceSpec
+	// IPFamilyPolicy existing in hub but not in v1alpha5.VirtualMachineServiceSpec
 	if src.Spec.Ports != nil {
 		dst.Spec.Ports = []vmoprv1alpha5.VirtualMachineServicePort{}
 		for _, port := range src.Spec.Ports {

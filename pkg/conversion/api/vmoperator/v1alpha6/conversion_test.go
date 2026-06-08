@@ -71,3 +71,4 @@ func TestFuzzyConversion(t *testing.T) {
 		Spoke:     &vmoprv1alpha6.ClusterVirtualMachineImage{},
 	}))
 }
+
