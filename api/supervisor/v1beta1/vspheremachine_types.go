@@ -261,22 +261,27 @@ func (r *InterfaceNetworkReference) GroupVersionKind() schema.GroupVersionKind {
 	return schema.FromAPIVersionAndKind(r.APIVersion, r.Kind)
 }
 
-// RouteSpec defines a static route for a guest.
+// RouteSpec defines a static route for a guest network interface.
+//
+// +kubebuilder:validation:XValidation:rule="!isCIDR(self.to) || !isIP(self.via) || cidr(self.to).ip().family() == ip(self.via).family()",message="to and via must belong to the same IP family"
 type RouteSpec struct {
-	// to is an IP4 CIDR. IP6 is not supported yet.
-	// Examples: 192.168.1.0/24, 192.168.100.100/32, 0.0.0.0/0
+	// to is an IPv4 or IPv6 destination CIDR.
+	// Examples: 192.168.1.0/24, 0.0.0.0/0, 2001:db8::/64, ::/0.
 	//
-	// +kubebuilder:validation:Pattern=`^([0-9]{1,3}\.){3}[0-9]{1,3}\/[0-9]{1,2}$`
-	// +kubebuilder:validation:MinLength=9
-	// +kubebuilder:validation:MaxLength=18
+	// +kubebuilder:validation:Pattern=`^((([0-9]{1,3}\.){3}[0-9]{1,3}/[0-9]{1,2})|([0-9a-fA-F:]+/[0-9]{1,3}))$`
+	// +kubebuilder:validation:MinLength=1
+	// +kubebuilder:validation:MaxLength=43
+	// +kubebuilder:validation:XValidation:rule="isCIDR(self)",message="to must be a valid IPv4 or IPv6 CIDR"
 	// +required
 	To string `json:"to,omitempty"`
 
-	// via is an IP4 address. IP6 is not supported yet.
+	// via is an IPv4 or IPv6 gateway IP address.
+	// Examples: 192.168.1.1, 10.0.0.1, 2001:db8::1, fd00::1.
 	//
-	// +kubebuilder:validation:Pattern=`^([0-9]{1,3}\.){3}[0-9]{1,3}$`
-	// +kubebuilder:validation:MinLength=7
-	// +kubebuilder:validation:MaxLength=15
+	// +kubebuilder:validation:Pattern=`^((([0-9]{1,3}\.){3}[0-9]{1,3})|([0-9a-fA-F]{1,4}:){1,7}[0-9a-fA-F]{1,4}|([0-9a-fA-F]{1,4}:)+:[0-9a-fA-F]{0,4}|::)$`
+	// +kubebuilder:validation:MinLength=1
+	// +kubebuilder:validation:MaxLength=39
+	// +kubebuilder:validation:XValidation:rule="isIP(self)",message="via must be a valid IPv4 or IPv6 address"
 	// +required
 	Via string `json:"via,omitempty"`
 }

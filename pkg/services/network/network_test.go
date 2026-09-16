@@ -673,6 +673,70 @@ var _ = Describe("Network provider", func() {
 				})
 			})
 
+			Context("ConfigureVirtualMachine with createSubnetSet=false and custom primary and secondary interfaces with IPv6 routes", func() {
+				BeforeEach(func() {
+					// Set createSubnetSet to false
+					vSphereCluster.Spec.Network = vmwarev1.Network{
+						NSXVPC: vmwarev1.NSXVPC{
+							CreateSubnetSet: ptr.To(false),
+						},
+					}
+
+					// Set up VSphereMachine with IPv6 static routes
+					machine.Spec.Network = vmwarev1.VSphereMachineNetworkSpec{
+						Interfaces: vmwarev1.InterfacesSpec{
+							Primary: vmwarev1.InterfaceSpec{
+								NetworkRef: vmwarev1.InterfaceNetworkReference{
+									Kind:       "SubnetSet",
+									APIVersion: nsxvpcv1.SchemeGroupVersion.String(),
+									Name:       "custom-primary-subnetset",
+								},
+								Routes: []vmwarev1.RouteSpec{
+									{
+										To:  "::/0",
+										Via: "fe80::1",
+									},
+								},
+							},
+							Secondary: []vmwarev1.SecondaryInterfaceSpec{
+								{
+									Name: "eth1",
+									InterfaceSpec: vmwarev1.InterfaceSpec{
+										NetworkRef: vmwarev1.InterfaceNetworkReference{
+											Kind:       "SubnetSet",
+											APIVersion: nsxvpcv1.SchemeGroupVersion.String(),
+											Name:       "secondary-subnetset",
+										},
+										Routes: []vmwarev1.RouteSpec{
+											{
+												To:  "2001:db8::/64",
+												Via: "2001:db8::1",
+											},
+										},
+									},
+								},
+							},
+						},
+					}
+				})
+
+				It("should propagate IPv6 static routes to VM interfaces", func() {
+					Expect(err).ToNot(HaveOccurred())
+					Expect(vm.Spec.Network).ToNot(BeNil())
+					Expect(vm.Spec.Network.Interfaces).To(HaveLen(2))
+
+					// Verify primary interface IPv6 route
+					Expect(vm.Spec.Network.Interfaces[0].Routes).To(HaveLen(1))
+					Expect(vm.Spec.Network.Interfaces[0].Routes[0].To).To(Equal("::/0"))
+					Expect(vm.Spec.Network.Interfaces[0].Routes[0].Via).To(Equal("fe80::1"))
+
+					// Verify secondary interface IPv6 route
+					Expect(vm.Spec.Network.Interfaces[1].Routes).To(HaveLen(1))
+					Expect(vm.Spec.Network.Interfaces[1].Routes[0].To).To(Equal("2001:db8::/64"))
+					Expect(vm.Spec.Network.Interfaces[1].Routes[0].Via).To(Equal("2001:db8::1"))
+				})
+			})
+
 			Context("ConfigureVirtualMachine with VLANs set in vSphereMachine spec", func() {
 				var oldGates map[string]bool
 

@@ -101,12 +101,13 @@ func createVSphereMachine(providerID string, imageName, className, storageClass,
 
 func TestVSphereMachine_ValidateCreate_MultiNetwork(t *testing.T) {
 	tests := []struct {
-		name            string
-		featureGate     bool
-		networkProvider string
-		network         vmwarev1.VSphereMachineNetworkSpec
-		wantErr         bool
-		wantErrMsg      string
+		name              string
+		featureGate       bool
+		ipv6DualStackGate bool
+		networkProvider   string
+		network           vmwarev1.VSphereMachineNetworkSpec
+		wantErr           bool
+		wantErrMsg        string
 	}{
 		{
 			name:            "interfaces set but feature gate disabled",
@@ -471,12 +472,241 @@ func TestVSphereMachine_ValidateCreate_MultiNetwork(t *testing.T) {
 			wantErr:    true,
 			wantErrMsg: "routes cannot be set when network provider is ExternallyManaged",
 		},
+		{
+			name:            "valid IPv4 routes on primary and secondary interfaces for NSX-VPC",
+			featureGate:     true,
+			networkProvider: manager.NSXVPCNetworkProvider,
+			network: vmwarev1.VSphereMachineNetworkSpec{
+				Interfaces: vmwarev1.InterfacesSpec{
+					Primary: vmwarev1.InterfaceSpec{
+						NetworkRef: vmwarev1.InterfaceNetworkReference{
+							Kind:       pkgnetwork.NetworkGVKNSXTVPCSubnetSet.Kind,
+							APIVersion: pkgnetwork.NetworkGVKNSXTVPCSubnetSet.GroupVersion().String(),
+							Name:       "primary-subnetset",
+						},
+						Routes: []vmwarev1.RouteSpec{{
+							To:  "192.168.1.0/24",
+							Via: "192.168.1.1",
+						}},
+					},
+					Secondary: []vmwarev1.SecondaryInterfaceSpec{{
+						Name: "eth1",
+						InterfaceSpec: vmwarev1.InterfaceSpec{
+							NetworkRef: vmwarev1.InterfaceNetworkReference{
+								Kind:       pkgnetwork.NetworkGVKNSXTVPCSubnet.Kind,
+								APIVersion: pkgnetwork.NetworkGVKNSXTVPCSubnet.GroupVersion().String(),
+								Name:       "secondary-subnet",
+							},
+							Routes: []vmwarev1.RouteSpec{{
+								To:  "10.0.0.0/8",
+								Via: "10.0.0.1",
+							}},
+						},
+					}},
+				},
+			},
+			wantErr: false,
+		},
+		{
+			name:              "valid IPv6 routes on primary and secondary interfaces with IPv6DualStack enabled",
+			featureGate:       true,
+			ipv6DualStackGate: true,
+			networkProvider:   manager.NSXVPCNetworkProvider,
+			network: vmwarev1.VSphereMachineNetworkSpec{
+				Interfaces: vmwarev1.InterfacesSpec{
+					Primary: vmwarev1.InterfaceSpec{
+						NetworkRef: vmwarev1.InterfaceNetworkReference{
+							Kind:       pkgnetwork.NetworkGVKNSXTVPCSubnetSet.Kind,
+							APIVersion: pkgnetwork.NetworkGVKNSXTVPCSubnetSet.GroupVersion().String(),
+							Name:       "primary-subnetset",
+						},
+						Routes: []vmwarev1.RouteSpec{{
+							To:  "::/0",
+							Via: "fe80::1",
+						}},
+					},
+					Secondary: []vmwarev1.SecondaryInterfaceSpec{{
+						Name: "eth1",
+						InterfaceSpec: vmwarev1.InterfaceSpec{
+							NetworkRef: vmwarev1.InterfaceNetworkReference{
+								Kind:       pkgnetwork.NetworkGVKNSXTVPCSubnet.Kind,
+								APIVersion: pkgnetwork.NetworkGVKNSXTVPCSubnet.GroupVersion().String(),
+								Name:       "secondary-subnet",
+							},
+							Routes: []vmwarev1.RouteSpec{{
+								To:  "2001:db8::/64",
+								Via: "2001:db8::1",
+							}},
+						},
+					}},
+				},
+			},
+			wantErr: false,
+		},
+		{
+			name:              "IPv6 route rejected when IPv6DualStack feature gate is disabled",
+			featureGate:       true,
+			ipv6DualStackGate: false,
+			networkProvider:   manager.NSXVPCNetworkProvider,
+			network: vmwarev1.VSphereMachineNetworkSpec{
+				Interfaces: vmwarev1.InterfacesSpec{
+					Primary: vmwarev1.InterfaceSpec{
+						NetworkRef: vmwarev1.InterfaceNetworkReference{
+							Kind:       pkgnetwork.NetworkGVKNSXTVPCSubnetSet.Kind,
+							APIVersion: pkgnetwork.NetworkGVKNSXTVPCSubnetSet.GroupVersion().String(),
+							Name:       "primary-subnetset",
+						},
+						Routes: []vmwarev1.RouteSpec{{
+							To:  "2001:db8::/64",
+							Via: "2001:db8::1",
+						}},
+					},
+				},
+			},
+			wantErr:    true,
+			wantErrMsg: "IPv6 routes can only be set when feature gate IPv6DualStack is enabled",
+		},
+		{
+			name:              "mixed IP family rejected (IPv4 to with IPv6 via)",
+			featureGate:       true,
+			ipv6DualStackGate: true,
+			networkProvider:   manager.NSXVPCNetworkProvider,
+			network: vmwarev1.VSphereMachineNetworkSpec{
+				Interfaces: vmwarev1.InterfacesSpec{
+					Primary: vmwarev1.InterfaceSpec{
+						NetworkRef: vmwarev1.InterfaceNetworkReference{
+							Kind:       pkgnetwork.NetworkGVKNSXTVPCSubnetSet.Kind,
+							APIVersion: pkgnetwork.NetworkGVKNSXTVPCSubnetSet.GroupVersion().String(),
+							Name:       "primary-subnetset",
+						},
+						Routes: []vmwarev1.RouteSpec{{
+							To:  "192.168.1.0/24",
+							Via: "2001:db8::1",
+						}},
+					},
+				},
+			},
+			wantErr:    true,
+			wantErrMsg: "to and via must belong to the same IP family",
+		},
+		{
+			name:              "mixed IP family rejected (IPv6 to with IPv4 via)",
+			featureGate:       true,
+			ipv6DualStackGate: true,
+			networkProvider:   manager.NSXVPCNetworkProvider,
+			network: vmwarev1.VSphereMachineNetworkSpec{
+				Interfaces: vmwarev1.InterfacesSpec{
+					Primary: vmwarev1.InterfaceSpec{
+						NetworkRef: vmwarev1.InterfaceNetworkReference{
+							Kind:       pkgnetwork.NetworkGVKNSXTVPCSubnetSet.Kind,
+							APIVersion: pkgnetwork.NetworkGVKNSXTVPCSubnetSet.GroupVersion().String(),
+							Name:       "primary-subnetset",
+						},
+						Routes: []vmwarev1.RouteSpec{{
+							To:  "2001:db8::/64",
+							Via: "192.168.1.1",
+						}},
+					},
+				},
+			},
+			wantErr:    true,
+			wantErrMsg: "to and via must belong to the same IP family",
+		},
+		{
+			name:            "invalid to CIDR format",
+			featureGate:     true,
+			networkProvider: manager.NSXVPCNetworkProvider,
+			network: vmwarev1.VSphereMachineNetworkSpec{
+				Interfaces: vmwarev1.InterfacesSpec{
+					Primary: vmwarev1.InterfaceSpec{
+						NetworkRef: vmwarev1.InterfaceNetworkReference{
+							Kind:       pkgnetwork.NetworkGVKNSXTVPCSubnetSet.Kind,
+							APIVersion: pkgnetwork.NetworkGVKNSXTVPCSubnetSet.GroupVersion().String(),
+							Name:       "primary-subnetset",
+						},
+						Routes: []vmwarev1.RouteSpec{{
+							To:  "invalid-cidr",
+							Via: "192.168.1.1",
+						}},
+					},
+				},
+			},
+			wantErr:    true,
+			wantErrMsg: "must be a valid CIDR",
+		},
+		{
+			name:            "invalid via IP format",
+			featureGate:     true,
+			networkProvider: manager.NSXVPCNetworkProvider,
+			network: vmwarev1.VSphereMachineNetworkSpec{
+				Interfaces: vmwarev1.InterfacesSpec{
+					Primary: vmwarev1.InterfaceSpec{
+						NetworkRef: vmwarev1.InterfaceNetworkReference{
+							Kind:       pkgnetwork.NetworkGVKNSXTVPCSubnetSet.Kind,
+							APIVersion: pkgnetwork.NetworkGVKNSXTVPCSubnetSet.GroupVersion().String(),
+							Name:       "primary-subnetset",
+						},
+						Routes: []vmwarev1.RouteSpec{{
+							To:  "192.168.1.0/24",
+							Via: "invalid-ip",
+						}},
+					},
+				},
+			},
+			wantErr:    true,
+			wantErrMsg: "must be a valid IP address",
+		},
+		{
+			name:              "valid IPv6 default route (::/0) accepted",
+			featureGate:       true,
+			ipv6DualStackGate: true,
+			networkProvider:   manager.NSXVPCNetworkProvider,
+			network: vmwarev1.VSphereMachineNetworkSpec{
+				Interfaces: vmwarev1.InterfacesSpec{
+					Primary: vmwarev1.InterfaceSpec{
+						NetworkRef: vmwarev1.InterfaceNetworkReference{
+							Kind:       pkgnetwork.NetworkGVKNSXTVPCSubnetSet.Kind,
+							APIVersion: pkgnetwork.NetworkGVKNSXTVPCSubnetSet.GroupVersion().String(),
+							Name:       "primary-subnetset",
+						},
+						Routes: []vmwarev1.RouteSpec{{
+							To:  "::/0",
+							Via: "fe80::1",
+						}},
+					},
+				},
+			},
+			wantErr: false,
+		},
+		{
+			name:              "valid IPv6 host route (/128) accepted",
+			featureGate:       true,
+			ipv6DualStackGate: true,
+			networkProvider:   manager.NSXVPCNetworkProvider,
+			network: vmwarev1.VSphereMachineNetworkSpec{
+				Interfaces: vmwarev1.InterfacesSpec{
+					Primary: vmwarev1.InterfaceSpec{
+						NetworkRef: vmwarev1.InterfaceNetworkReference{
+							Kind:       pkgnetwork.NetworkGVKNSXTVPCSubnetSet.Kind,
+							APIVersion: pkgnetwork.NetworkGVKNSXTVPCSubnetSet.GroupVersion().String(),
+							Name:       "primary-subnetset",
+						},
+						Routes: []vmwarev1.RouteSpec{{
+							To:  "2001:db8::1/128",
+							Via: "fe80::1",
+						}},
+					},
+				},
+			},
+			wantErr: false,
+		},
 	}
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			g := NewWithT(t)
 			featuregatetesting.SetFeatureGateDuringTest(t, feature.Gates, feature.MultiNetworks, tc.featureGate)
+			featuregatetesting.SetFeatureGateDuringTest(t, feature.Gates, feature.IPv6DualStack, tc.ipv6DualStackGate)
 			webhook := &VSphereMachine{NetworkProviderFactory: newTestStaticNetworkProviderFactory(t, tc.networkProvider)}
 			obj := &vmwarev1.VSphereMachine{Spec: vmwarev1.VSphereMachineSpec{Network: tc.network}}
 			_, err := webhook.ValidateCreate(context.Background(), obj)

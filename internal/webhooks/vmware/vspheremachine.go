@@ -20,6 +20,7 @@ package vmware
 import (
 	"context"
 	"fmt"
+	"net"
 	"reflect"
 
 	"k8s.io/apimachinery/pkg/util/validation/field"
@@ -199,6 +200,15 @@ func validateNetwork(networkProvider string, network vmwarev1.VSphereMachineNetw
 					interfaceNames[secondaryInterface.Name] = struct{}{}
 				}
 			}
+
+			if networkProvider != manager.ExternallyManagedNetworkProvider {
+				if network.Interfaces.Primary.IsDefined() && networkProvider != manager.VDSNetworkProvider {
+					allErrs = append(allErrs, validateRoutes(network.Interfaces.Primary.Routes, fldPath.Child("interfaces", "primary", "routes"))...)
+				}
+				for i, secondaryInterface := range network.Interfaces.Secondary {
+					allErrs = append(allErrs, validateRoutes(secondaryInterface.Routes, fldPath.Child("interfaces", "secondary").Index(i).Child("routes"))...)
+				}
+			}
 		}
 	}
 
@@ -303,4 +313,50 @@ func validatePolicies(policies []vmwarev1.PolicyRef, fldPath *field.Path) field.
 	return field.ErrorList{
 		field.Forbidden(fldPath, "policies can only be set when feature gate InfrastructurePolicies is enabled"),
 	}
+}
+
+func validateRoutes(routes []vmwarev1.RouteSpec, fldPath *field.Path) field.ErrorList {
+	var allErrs field.ErrorList
+	for i, route := range routes {
+		routePath := fldPath.Index(i)
+
+		toIP, _, err := net.ParseCIDR(route.To)
+		if err != nil {
+			allErrs = append(allErrs, field.Invalid(
+				routePath.Child("to"),
+				route.To,
+				fmt.Sprintf("must be a valid CIDR: %v", err),
+			))
+		}
+
+		viaIP := net.ParseIP(route.Via)
+		if viaIP == nil {
+			allErrs = append(allErrs, field.Invalid(
+				routePath.Child("via"),
+				route.Via,
+				"must be a valid IP address",
+			))
+		}
+
+		if err == nil && viaIP != nil {
+			toIsIPv4 := toIP.To4() != nil
+			viaIsIPv4 := viaIP.To4() != nil
+
+			if toIsIPv4 != viaIsIPv4 {
+				allErrs = append(allErrs, field.Invalid(
+					routePath,
+					route,
+					"to and via must belong to the same IP family",
+				))
+			} else if !toIsIPv4 {
+				if !feature.Gates.Enabled(feature.IPv6DualStack) {
+					allErrs = append(allErrs, field.Forbidden(
+						routePath,
+						"IPv6 routes can only be set when feature gate IPv6DualStack is enabled",
+					))
+				}
+			}
+		}
+	}
+	return allErrs
 }
