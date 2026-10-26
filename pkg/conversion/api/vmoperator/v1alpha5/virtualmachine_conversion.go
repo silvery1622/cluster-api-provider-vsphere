@@ -104,8 +104,13 @@ func convert_v1alpha5_VirtualMachine_To_hub_VirtualMachine(_ context.Context, sr
 				d := vmoprvhub.VirtualMachineNetworkInterfaceSpec{}
 				d.Addresses = iface.Addresses
 				// AdvancedProperties existing in hub but not in v1alpha5.VirtualMachineNetworkInterfaceSpec
-				d.DHCP4 = iface.DHCP4
-				d.DHCP6 = iface.DHCP6
+				// Legacy false means unset, so keep nil to defer to the network provider.
+				if iface.DHCP4 {
+					d.DHCP4 = ptr.To(true)
+				}
+				if iface.DHCP6 {
+					d.DHCP6 = ptr.To(true)
+				}
 				d.Gateway4 = iface.Gateway4
 				d.Gateway6 = iface.Gateway6
 				d.GuestDeviceName = iface.GuestDeviceName
@@ -379,8 +384,9 @@ func convert_hub_VirtualMachine_To_v1alpha5_VirtualMachine(_ context.Context, sr
 				d := vmoprv1alpha5.VirtualMachineNetworkInterfaceSpec{}
 				d.Addresses = iface.Addresses
 				// AdvancedProperties existing in hub but not in v1alpha5.VirtualMachineNetworkInterfaceSpec
-				d.DHCP4 = iface.DHCP4
-				d.DHCP6 = iface.DHCP6
+				// Legacy APIs cannot distinguish unset DHCP from explicitly disabled DHCP.
+				d.DHCP4 = ptr.Deref(iface.DHCP4, false)
+				d.DHCP6 = ptr.Deref(iface.DHCP6, false)
 				d.Gateway4 = iface.Gateway4
 				d.Gateway6 = iface.Gateway6
 				d.GuestDeviceName = iface.GuestDeviceName

@@ -123,10 +123,10 @@ func convert_v1alpha6_VirtualMachine_To_hub_VirtualMachine(_ context.Context, sr
 					})
 				}
 				if iface.DHCP4 != nil {
-					d.DHCP4 = *iface.DHCP4
+					d.DHCP4 = ptr.To(*iface.DHCP4)
 				}
 				if iface.DHCP6 != nil {
-					d.DHCP6 = *iface.DHCP6
+					d.DHCP6 = ptr.To(*iface.DHCP6)
 				}
 				d.Gateway4 = iface.Gateway4
 				d.Gateway6 = iface.Gateway6
@@ -448,8 +448,12 @@ func convert_hub_VirtualMachine_To_v1alpha6_VirtualMachine(_ context.Context, sr
 						Value: ap.Value,
 					})
 				}
-				d.DHCP4 = ptr.To(iface.DHCP4)
-				d.DHCP6 = ptr.To(iface.DHCP6)
+				if iface.DHCP4 != nil {
+					d.DHCP4 = ptr.To(*iface.DHCP4)
+				}
+				if iface.DHCP6 != nil {
+					d.DHCP6 = ptr.To(*iface.DHCP6)
+				}
 				d.Gateway4 = iface.Gateway4
 				d.Gateway6 = iface.Gateway6
 				d.GuestDeviceName = iface.GuestDeviceName
