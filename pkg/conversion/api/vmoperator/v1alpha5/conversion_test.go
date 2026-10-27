@@ -24,6 +24,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	runtimeserializer "k8s.io/apimachinery/pkg/runtime/serializer"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
+	"k8s.io/utils/ptr"
 	"sigs.k8s.io/randfill"
 
 	"sigs.k8s.io/cluster-api-provider-vsphere/pkg/conversion"
@@ -42,6 +43,12 @@ func TestFuzzyConversion(t *testing.T) {
 		Converter: converter,
 		Hub:       &vmoprvhub.VirtualMachine{},
 		Spoke:     &vmoprv1alpha5.VirtualMachine{},
+		CheckTypes: conversiontest.RoundTripCheckTypesInput{
+			PointerBoolToBoolFields: []string{
+				"VirtualMachine.Spec.Network.Interfaces[0].DHCP4",
+				"VirtualMachine.Spec.Network.Interfaces[0].DHCP6",
+			},
+		},
 		FuzzerFuncs: []fuzzer.FuzzerFuncs{
 			virtualMachineFuncs,
 		},
@@ -88,6 +95,7 @@ func virtualMachineFuncs(_ runtimeserializer.CodecFactory) []interface{} {
 	return []interface{}{
 		hubVirtualMachineNetworkSpec,
 		hubVirtualMachineNetworkInterfaceSpec,
+		hubVirtualMachineNetworkInterfaceStatus,
 		hubVirtualMachineAffinitySpec,
 	}
 }
@@ -115,6 +123,14 @@ func hubVirtualMachineServiceSpec(in *vmoprvhub.VirtualMachineServiceSpec, c ran
 
 func hubVirtualMachineNetworkInterfaceSpec(in *vmoprvhub.VirtualMachineNetworkInterfaceSpec, c randfill.Continue) {
 	c.FillNoCustom(in)
+	// Legacy APIs cannot represent explicit false; fuzz only their supported
+	// hub states (nil and true). The conversion client tests cover explicit false.
+	if !ptr.Deref(in.DHCP4, false) {
+		in.DHCP4 = nil
+	}
+	if !ptr.Deref(in.DHCP6, false) {
+		in.DHCP6 = nil
+	}
 	// Fields existing in hub but not in v1alpha5.VirtualMachineNetworkInterfaceSpec
 	in.AdvancedProperties = nil
 	in.IPAMModes = nil
@@ -139,4 +155,11 @@ func virtualMachineGroupFuncs(_ runtimeserializer.CodecFactory) []interface{} {
 func hubVirtualMachineGroupBootOrderGroup(in *vmoprvhub.VirtualMachineGroupBootOrderGroup, c randfill.Continue) {
 	c.FillNoCustom(in)
 	in.PowerOffDelay = nil
+}
+
+func hubVirtualMachineNetworkInterfaceStatus(in *vmoprvhub.VirtualMachineNetworkInterfaceStatus, c randfill.Continue) {
+	c.FillNoCustom(in)
+	// These observed device properties are only available in v1alpha6.
+	in.VNUMANodeID = nil
+	in.VMXNet3 = nil
 }

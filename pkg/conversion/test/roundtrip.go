@@ -20,6 +20,7 @@ package test
 import (
 	"fmt"
 	"reflect"
+	"slices"
 	"testing"
 
 	"github.com/google/go-cmp/cmp"
@@ -67,6 +68,11 @@ type RoundTripCheckTypesInput struct {
 	// Instruct the type checked about a field rename, e.g. "VirtualMachine.Status.NodeName": "Host",
 	// Note: currently this applies only to fields of type scalar (not to pointers, array, map, struct).
 	FieldNameMap map[string]string
+
+	// PointerBoolToBoolFields lists field paths that intentionally use *bool in
+	// the hub and bool in a legacy spoke. Both types are still checked, and all
+	// other fields retain the usual strict type checks.
+	PointerBoolToBoolFields []string
 }
 
 type roundTripCheckTypesOptions struct {
@@ -163,8 +169,13 @@ func inspectTypes(t *testing.T, hubT reflect.Type, spokeT reflect.Type, path *fi
 	t.Helper()
 	g := NewWithT(t)
 
+	if slices.Contains(options.PointerBoolToBoolFields, path.String()) {
+		g.Expect(hubT).To(Equal(reflect.TypeFor[*bool]()), fmt.Sprintf("field %s must be *bool in hub", path))
+		g.Expect(spokeT).To(Equal(reflect.TypeFor[bool]()), fmt.Sprintf("field %s must be bool in spoke", path))
+		return
+	}
+
 	// If hub type is a pointer, inspect Elem types.
-	// Note: Current logic assumes that when a field in hub is a pointer, also the corresponding spoke field is. This can be improved in the future.
 	if hubT.Kind() == reflect.Pointer {
 		g.Expect(spokeT.Kind()).To(Equal(reflect.Pointer), fmt.Sprintf("field %s is a pointer in hub, not in spoke", path.String()))
 		inspectTypes(t, hubT.Elem(), spokeT.Elem(), path, options)
