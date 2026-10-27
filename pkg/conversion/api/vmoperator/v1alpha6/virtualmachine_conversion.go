@@ -18,6 +18,7 @@ package v1alpha6
 
 import (
 	"context"
+	"slices"
 
 	vmoprv1alpha6 "github.com/vmware-tanzu/vm-operator/api/v1alpha6"
 	vmoprv1alpha6common "github.com/vmware-tanzu/vm-operator/api/v1alpha6/common"
@@ -329,6 +330,21 @@ func convert_v1alpha6_VirtualMachine_To_hub_VirtualMachine(_ context.Context, sr
 					}
 				}
 				d.Name = iface.Name
+				if iface.VNUMANodeID != nil {
+					d.VNUMANodeID = ptr.To(*iface.VNUMANodeID)
+				}
+				if iface.VMXNet3 != nil {
+					d.VMXNet3 = &vmoprvhub.VirtualMachineNetworkInterfaceVMXNet3Status{
+						UPTv2InactiveReasonVM:    slices.Clone(iface.VMXNet3.UPTv2InactiveReasonVM),
+						UPTv2InactiveReasonOther: slices.Clone(iface.VMXNet3.UPTv2InactiveReasonOther),
+					}
+					if iface.VMXNet3.UPTv2Enabled != nil {
+						d.VMXNet3.UPTv2Enabled = ptr.To(*iface.VMXNet3.UPTv2Enabled)
+					}
+					if iface.VMXNet3.UPTv2Active != nil {
+						d.VMXNet3.UPTv2Active = ptr.To(*iface.VMXNet3.UPTv2Active)
+					}
+				}
 				dst.Status.Network.Interfaces = append(dst.Status.Network.Interfaces, d)
 			}
 		}
@@ -656,6 +672,21 @@ func convert_hub_VirtualMachine_To_v1alpha6_VirtualMachine(_ context.Context, sr
 					}
 				}
 				d.Name = iface.Name
+				if iface.VNUMANodeID != nil {
+					d.VNUMANodeID = ptr.To(*iface.VNUMANodeID)
+				}
+				if iface.VMXNet3 != nil {
+					d.VMXNet3 = &vmoprv1alpha6.VirtualMachineNetworkInterfaceVMXNet3Status{
+						UPTv2InactiveReasonVM:    slices.Clone(iface.VMXNet3.UPTv2InactiveReasonVM),
+						UPTv2InactiveReasonOther: slices.Clone(iface.VMXNet3.UPTv2InactiveReasonOther),
+					}
+					if iface.VMXNet3.UPTv2Enabled != nil {
+						d.VMXNet3.UPTv2Enabled = ptr.To(*iface.VMXNet3.UPTv2Enabled)
+					}
+					if iface.VMXNet3.UPTv2Active != nil {
+						d.VMXNet3.UPTv2Active = ptr.To(*iface.VMXNet3.UPTv2Active)
+					}
+				}
 				dst.Status.Network.Interfaces = append(dst.Status.Network.Interfaces, d)
 			}
 		}
